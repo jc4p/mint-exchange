@@ -26,6 +26,7 @@ export const EVENTS = {
   NFT_LISTING_CANCELLED: 'nft:listing-cancelled',
   CREATE_LISTING: 'nft:create-listing',
   EDIT_LISTING: 'nft:edit-listing',
+  LISTING_CREATED: 'nft:listing-created',
   
   // UI events
   MODAL_OPEN: 'ui:modal-open',

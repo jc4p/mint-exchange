@@ -14,7 +14,10 @@ export class ProfileTab extends BaseElement {
       purchases: [],
       stats: null,
       loading: true,
-      activeView: 'owned' // 'owned', 'listings', 'purchases'
+      activeView: 'owned', // 'owned', 'listings', 'purchases'
+      nftsPage: 1,
+      nftsPerPage: 12,
+      totalNfts: 0
     }
   }
 
@@ -36,6 +39,14 @@ export class ProfileTab extends BaseElement {
         await this.initialize(user)
       })
     }
+    
+    // Listen for listing created events to refresh data
+    this.subscribe(EVENTS.LISTING_CREATED, async () => {
+      if (this._state.walletAddress) {
+        await this.fetchUserListings(this._state.walletAddress)
+        await this.fetchUserStats(this._state.walletAddress)
+      }
+    })
   }
 
   async initialize(frameUser) {
@@ -79,10 +90,13 @@ export class ProfileTab extends BaseElement {
     try {
       const response = await fetch(`/api/users/${address}/nfts`)
       const data = await response.json()
-      this.setState({ nfts: data.nfts || [] })
+      this.setState({ 
+        nfts: data.nfts || [],
+        totalNfts: data.nfts?.length || 0
+      })
     } catch (error) {
       console.error('Failed to fetch NFTs:', error)
-      this.setState({ nfts: [] })
+      this.setState({ nfts: [], totalNfts: 0 })
     }
   }
 
@@ -131,6 +145,17 @@ export class ProfileTab extends BaseElement {
     const date = new Date(dateString)
     const options = { month: 'short', day: 'numeric', year: 'numeric' }
     return date.toLocaleDateString('en-US', options)
+  }
+
+  getPaginatedNfts() {
+    const { nfts, nftsPage, nftsPerPage } = this._state
+    const startIndex = (nftsPage - 1) * nftsPerPage
+    return nfts.slice(startIndex, startIndex + nftsPerPage)
+  }
+
+  getTotalPages() {
+    const { totalNfts, nftsPerPage } = this._state
+    return Math.ceil(totalNfts / nftsPerPage)
   }
 
   render() {
@@ -281,8 +306,17 @@ export class ProfileTab extends BaseElement {
         .nft-card {
           display: flex;
           flex-direction: column;
-          gap: 12px;
-          cursor: pointer;
+          background: white;
+          border: 1px solid #cedbe8;
+          border-radius: 12px;
+          overflow: hidden;
+          transition: all 0.2s;
+        }
+        
+        .nft-card:hover {
+          border-color: #b8c9dd;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+          transform: translateY(-2px);
         }
         
         .nft-image {
@@ -291,12 +325,47 @@ export class ProfileTab extends BaseElement {
           background-size: cover;
           background-position: center;
           background-color: #e7edf4;
-          border-radius: 8px;
-          transition: transform 0.2s;
+          cursor: pointer;
         }
         
-        .nft-card:hover .nft-image {
-          transform: scale(1.02);
+        .nft-info {
+          padding: 12px;
+        }
+        
+        .nft-title {
+          color: #0d141c;
+          font-size: 14px;
+          font-weight: 600;
+          margin: 0 0 4px 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        
+        .nft-collection {
+          color: #49739c;
+          font-size: 12px;
+          margin: 0 0 12px 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        
+        .list-button {
+          width: 100%;
+          padding: 8px;
+          background: #0c7ff2;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        
+        .list-button:hover {
+          background: #0968d9;
         }
         
         /* Listings View */
@@ -496,6 +565,54 @@ export class ProfileTab extends BaseElement {
           margin: 0;
         }
         
+        /* Pagination */
+        .pagination-container {
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          gap: 8px;
+          margin-top: 24px;
+          padding: 16px;
+        }
+        
+        .pagination-button {
+          padding: 8px 12px;
+          background: white;
+          border: 1px solid #cedbe8;
+          border-radius: 6px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #49739c;
+          cursor: pointer;
+          transition: all 0.2s;
+          min-width: 44px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .pagination-button:hover:not(:disabled) {
+          border-color: #0c7ff2;
+          color: #0c7ff2;
+        }
+        
+        .pagination-button.active {
+          background: #0c7ff2;
+          border-color: #0c7ff2;
+          color: white;
+        }
+        
+        .pagination-button:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        
+        .pagination-info {
+          color: #49739c;
+          font-size: 14px;
+          margin: 0 16px;
+        }
+        
       </style>
     `
 
@@ -509,11 +626,13 @@ export class ProfileTab extends BaseElement {
       return
     }
 
-    const { walletAddress, nfts, listings, purchases, stats, activeView, user } = this._state
+    const { walletAddress, nfts, listings, purchases, stats, activeView, user, nftsPage } = this._state
     const shortAddress = walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : 'Not connected'
     const avatarUrl = this.getAvatarUrl()
+    const paginatedNfts = this.getPaginatedNfts()
+    const totalPages = this.getTotalPages()
     
-    console.log('Profile render state:', { activeView, listings: listings.length, purchases: purchases.length })
+    console.log('Profile render state:', { activeView, listings: listings.length, purchases: purchases.length, nftsPage, totalPages })
 
     this.shadowRoot.innerHTML = `
       ${styles}
@@ -559,12 +678,42 @@ export class ProfileTab extends BaseElement {
         ${activeView === 'owned' ? `
           ${nfts.length > 0 ? `
             <div class="nft-grid">
-              ${nfts.map(nft => `
+              ${paginatedNfts.map(nft => `
                 <div class="nft-card" data-contract="${nft.contract.address}" data-token="${nft.tokenId}">
                   <div class="nft-image" style="background-image: url('${nft.media[0]?.gateway || '/placeholder.png'}')"></div>
+                  <div class="nft-info">
+                    <h3 class="nft-title">${nft.title}</h3>
+                    <p class="nft-collection">${nft.contract.name || 'Unknown Collection'}</p>
+                    <button class="list-button">List for Sale</button>
+                  </div>
                 </div>
               `).join('')}
             </div>
+            ${totalPages > 1 ? `
+              <div class="pagination-container">
+                <button class="pagination-button" data-action="prev" ${nftsPage === 1 ? 'disabled' : ''}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 256 256">
+                    <path d="M165.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L91.31,128Z"></path>
+                  </svg>
+                </button>
+                
+                ${Array.from({ length: totalPages }, (_, i) => i + 1).map(page => `
+                  <button class="pagination-button ${page === nftsPage ? 'active' : ''}" data-page="${page}">
+                    ${page}
+                  </button>
+                `).join('')}
+                
+                <button class="pagination-button" data-action="next" ${nftsPage === totalPages ? 'disabled' : ''}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 256 256">
+                    <path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"></path>
+                  </svg>
+                </button>
+                
+                <p class="pagination-info">
+                  ${(nftsPage - 1) * this._state.nftsPerPage + 1}-${Math.min(nftsPage * this._state.nftsPerPage, nfts.length)} of ${nfts.length}
+                </p>
+              </div>
+            ` : ''}
           ` : `
             <div class="empty-state">
               <div class="empty-icon">
@@ -642,17 +791,55 @@ export class ProfileTab extends BaseElement {
       this.on(tab, 'click', (e) => {
         const view = e.currentTarget.dataset.view
         console.log('Tab clicked:', view)
-        this.setState({ activeView: view })
+        this.setState({ activeView: view, nftsPage: 1 }) // Reset to page 1 when switching tabs
+      })
+    })
+
+    // Pagination buttons
+    const paginationButtons = this.shadowRoot.querySelectorAll('.pagination-button')
+    paginationButtons.forEach(btn => {
+      this.on(btn, 'click', (e) => {
+        const action = e.currentTarget.dataset.action
+        const page = e.currentTarget.dataset.page
+        
+        if (page) {
+          // Direct page navigation
+          this.setState({ nftsPage: parseInt(page) })
+        } else if (action === 'prev' && this._state.nftsPage > 1) {
+          // Previous page
+          this.setState({ nftsPage: this._state.nftsPage - 1 })
+        } else if (action === 'next' && this._state.nftsPage < this.getTotalPages()) {
+          // Next page
+          this.setState({ nftsPage: this._state.nftsPage + 1 })
+        }
       })
     })
 
 
-    // NFT cards
-    const nftCards = this.shadowRoot.querySelectorAll('.nft-card')
-    nftCards.forEach(card => {
-      this.on(card, 'click', (e) => {
-        const contract = e.currentTarget.dataset.contract
-        const tokenId = e.currentTarget.dataset.token
+    // List buttons on NFT cards
+    const listBtns = this.shadowRoot.querySelectorAll('.list-button')
+    listBtns.forEach(btn => {
+      this.on(btn, 'click', (e) => {
+        e.stopPropagation()
+        const card = e.target.closest('.nft-card')
+        const contract = card.dataset.contract
+        const tokenId = card.dataset.token
+        const nft = this._state.nfts.find(n => 
+          n.contract.address === contract && n.tokenId === tokenId
+        )
+        
+        // Emit event to open create listing modal
+        this.emit(EVENTS.CREATE_LISTING, { nft })
+      })
+    })
+    
+    // Click on NFT image to view details
+    const nftImages = this.shadowRoot.querySelectorAll('.nft-image')
+    nftImages.forEach(img => {
+      this.on(img, 'click', (e) => {
+        const card = e.target.closest('.nft-card')
+        const contract = card.dataset.contract
+        const tokenId = card.dataset.token
         const nft = this._state.nfts.find(n => 
           n.contract.address === contract && n.tokenId === tokenId
         )

@@ -278,6 +278,7 @@ app.get('/', async (c) => {
           </main>
           
           <nav-tabs active="home"></nav-tabs>
+          <create-listing></create-listing>
         </frame-provider>
       `,
       title: 'Browse NFTs - FC NFT Exchange'
@@ -303,6 +304,7 @@ app.get('/profile', async (c) => {
             </main>
             
             <nav-tabs active="profile"></nav-tabs>
+            <create-listing></create-listing>
           </div>
         </frame-provider>
       `,
@@ -335,6 +337,7 @@ app.get('/activity', async (c) => {
           </main>
           
           <nav-tabs active="activity"></nav-tabs>
+          <create-listing></create-listing>
         </frame-provider>
       `,
       title: 'Activity Feed - FC NFT Exchange'
@@ -354,8 +357,9 @@ app.get('/api/listings', async (c) => {
     const limit = parseInt(c.req.query('limit') || '20')
     const sort = c.req.query('sort') || 'recent'
     const seller = c.req.query('seller')
+    const search = c.req.query('search')
     
-    const result = await db.getActiveListings({ page, limit, sort, seller })
+    const result = await db.getActiveListings({ page, limit, sort, seller, search })
     
     // Transform data to match frontend expectations
     const transformedListings = result.listings.map(listing => ({
@@ -422,6 +426,69 @@ app.get('/api/listings', async (c) => {
     // Re-throw other errors
     throw error
   }
+})
+
+// Create listing endpoint
+app.post('/api/listings', async (c) => {
+  try {
+    const db = new Database(c.env.DB)
+    const body = await c.req.json()
+    
+    // TODO: Verify user authentication
+    // For now, we'll use a mock user
+    const userId = 1 // Should come from auth token
+    
+    // Generate a unique listing ID
+    const listingId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    
+    // Create listing in database
+    const listing = await db.createListing({
+      listing_id: listingId,
+      seller_address: body.sellerAddress || '0x0db12C0A67bc5B8942ea3126a465d7a0b23126C7',
+      nft_contract: body.nftContract,
+      token_id: body.tokenId,
+      price: body.price,
+      expiry: body.expiry,
+      metadata_uri: body.metadata?.metadata_uri || '',
+      image_url: body.metadata?.image_url || '',
+      name: body.metadata?.name || 'Untitled NFT',
+      description: body.metadata?.description || ''
+    })
+    
+    // Return the created listing
+    return c.json({
+      id: `listing_${listing.listing_id}`,
+      ...listing
+    })
+  } catch (error) {
+    console.error('Error creating listing:', error)
+    return c.json({ error: 'Failed to create listing' }, 500)
+  }
+})
+
+// Search page route
+app.get('/search', async (c) => {
+  return c.html(
+    Layout({
+      children: html`
+        <frame-provider>
+          <header class="header">
+            <div class="header-content">
+              <h1>Search</h1>
+            </div>
+          </header>
+        
+          <main class="main-content">
+            <search-page></search-page>
+          </main>
+          
+          <nav-tabs active="search"></nav-tabs>
+          <create-listing></create-listing>
+        </frame-provider>
+      `,
+      title: 'Search NFTs - FC NFT Exchange'
+    })
+  )
 })
 
 app.notFound((c) => {

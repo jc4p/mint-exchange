@@ -42,7 +42,7 @@ export class Database {
   }
 
   // Listing operations
-  async getActiveListings({ page = 1, limit = 20, sort = 'recent', seller = null }) {
+  async getActiveListings({ page = 1, limit = 20, sort = 'recent', seller = null, search = null }) {
     const offset = (page - 1) * limit
     let orderBy = 'created_at DESC'
     
@@ -60,6 +60,11 @@ export class Database {
     if (seller) {
       conditions.push('l.seller_address = ?')
       params.push(seller.toLowerCase())
+    }
+    
+    if (search) {
+      conditions.push('(LOWER(l.name) LIKE ? OR LOWER(l.description) LIKE ?)')
+      params.push(`%${search.toLowerCase()}%`, `%${search.toLowerCase()}%`)
     }
     
     const whereClause = `WHERE ${conditions.join(' AND ')}`

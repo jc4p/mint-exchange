@@ -8,6 +8,8 @@ import './components/featured-section.js'
 import './components/latest-section.js'
 import './components/profile-tab.js'
 import './components/activity-feed.js'
+import './components/create-listing.js'
+import './components/search-page.js'
 import { eventBus, EVENTS } from './utils/events.js'
 
 console.log('Client index loaded - all components imported')
@@ -27,16 +29,17 @@ eventBus.on(EVENTS.TAB_CHANGE, ({ tab }) => {
       window.location.href = '/profile'
       break
     case 'create':
-      // TODO: Open create listing modal
       console.log('Create listing tab clicked')
+      // Emit event to open create listing modal without a specific NFT
+      eventBus.emit(EVENTS.CREATE_LISTING, { nft: null })
       break
     case 'activity':
       console.log('Navigating to activity...')
       window.location.href = '/activity'
       break
     case 'search':
-      // TODO: Open search interface
-      console.log('Search tab clicked')
+      console.log('Navigating to search...')
+      window.location.href = '/search'
       break
   }
 })
