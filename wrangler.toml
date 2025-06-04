@@ -1,0 +1,33 @@
+# For more details on how to configure Wrangler, refer to:
+# https://developers.cloudflare.com/workers/wrangler/configuration/
+
+name = "nft-exchange"
+main = "src/index.js"
+compatibility_date = "2025-06-04"
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+
+[build]
+command = ""
+
+[assets]
+directory = "./dist/client"
+
+# D1 Database Binding
+# https://developers.cloudflare.com/d1/
+[[d1_databases]]
+binding = "DB"
+database_name = "nft-exchange"
+database_id = "b8152478-4cad-4769-ba8e-afd055db175f"
+
+# R2 Storage Binding (for image uploads)
+# https://developers.cloudflare.com/r2/
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "nft-exchange-images"
+
+# Environment Variables
+[vars]
+# Base RPC URL
+BASE_RPC_URL = "https://mainnet.base.org"
+# Smart contract address (to be deployed)
+CONTRACT_ADDRESS = ""

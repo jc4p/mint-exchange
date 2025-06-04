@@ -1,0 +1,9 @@
+/* Import all component styles */
+@import './layout.css';
+@import './components/header.css';
+@import './components/featured.css';
+@import './components/latest.css';
+@import './components/navigation.css';
+@import './components/auth.css';
+@import './components/nft-grid.css';
+@import './components/profile.css';

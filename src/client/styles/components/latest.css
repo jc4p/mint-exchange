@@ -1,0 +1,67 @@
+/* Latest Section Component */
+.latest-section {
+  padding: 0 1rem; /* p-4 */
+}
+
+.latest-item {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 1rem; /* gap-4 */
+  border-radius: 0.75rem; /* rounded-xl */
+  padding: 1rem 0;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.latest-item:hover {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+.latest-info {
+  display: flex;
+  flex: 2 2 0px; /* flex-[2_2_0px] */
+  flex-direction: column;
+  gap: 0.25rem; /* gap-1 */
+}
+
+.latest-label {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.875rem; /* text-sm */
+  font-weight: 400; /* font-normal */
+  line-height: 1.5; /* leading-normal */
+}
+
+.latest-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1rem; /* text-base */
+  font-weight: 700; /* font-bold */
+  line-height: 1.25; /* leading-tight */
+}
+
+.latest-description {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.875rem; /* text-sm */
+  font-weight: 400; /* font-normal */
+  line-height: 1.5; /* leading-normal */
+}
+
+.latest-image {
+  flex: 1 1 0%;
+  width: 100%;
+  aspect-ratio: 16 / 9; /* aspect-video */
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  border-radius: 0.75rem; /* rounded-xl */
+  background-color: var(--border-color);
+}
+
+@media (min-width: 640px) {
+  .latest-section {
+    padding: 0 1.5rem;
+  }
+}

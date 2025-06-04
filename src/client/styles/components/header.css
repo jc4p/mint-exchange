@@ -1,0 +1,67 @@
+/* Header Component */
+.header {
+  background-color: var(--surface-color);
+  padding: 1rem 1rem 0.5rem; /* p-4 pb-2 */
+}
+
+.header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.header h1 {
+  margin: 0;
+  flex: 1 1 0%;
+  text-align: center;
+  padding-left: 3rem; /* pl-12 */
+  color: var(--text-primary);
+  font-size: 1.125rem; /* text-lg */
+  font-weight: 700; /* font-bold */
+  line-height: 1.25; /* leading-tight */
+  letter-spacing: -0.015em; /* tracking-[-0.015em] */
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 3rem; /* w-12 */
+}
+
+.search-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  border-radius: 0.75rem; /* rounded-xl */
+  height: 3rem; /* h-12 */
+  color: var(--text-primary);
+  gap: 0.5rem; /* gap-2 */
+  font-size: 1rem; /* text-base */
+  font-weight: 700; /* font-bold */
+  line-height: 1.5; /* leading-normal */
+  letter-spacing: 0.015em; /* tracking-[0.015em] */
+  min-width: 0;
+  padding: 0;
+  transition: background-color 0.2s ease;
+}
+
+.search-button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.search-button svg {
+  width: 24px;
+  height: 24px;
+}
+
+@media (min-width: 768px) {
+  .header h1 {
+    font-size: 1.25rem;
+  }
+}

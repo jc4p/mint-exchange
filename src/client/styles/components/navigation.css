@@ -1,0 +1,74 @@
+/* Navigation Component */
+.nav-tabs {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: var(--surface-color);
+  border-top: 1px solid var(--border-color);
+  z-index: 100;
+}
+
+.nav-tabs-container {
+  display: flex;
+  gap: 0.5rem; /* gap-2 */
+  padding: 0.5rem 1rem 0.75rem; /* px-4 pb-3 pt-2 */
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.nav-tab {
+  display: flex;
+  flex: 1 1 0%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem; /* gap-1 */
+  border-radius: 9999px; /* rounded-full */
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  padding: 0;
+  transition: color 0.2s ease;
+}
+
+.nav-tab:hover {
+  color: var(--text-primary);
+}
+
+.nav-tab-active {
+  color: var(--text-primary);
+}
+
+.nav-tab-icon {
+  display: flex;
+  height: 2rem; /* h-8 */
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+}
+
+.nav-tab-icon svg {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+}
+
+.nav-tab-label {
+  margin: 0;
+  color: inherit;
+  font-size: 0.75rem; /* text-xs */
+  font-weight: 500; /* font-medium */
+  line-height: 1.5; /* leading-normal */
+  letter-spacing: 0.015em; /* tracking-[0.015em] */
+}
+
+/* Bottom spacer for safe area - h-5 in tailwind is 1.25rem */
+.nav-tabs::after {
+  content: '';
+  display: block;
+  height: 1.25rem; /* h-5 */
+  background-color: var(--surface-color);
+}

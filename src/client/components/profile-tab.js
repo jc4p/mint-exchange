@@ -1,0 +1,707 @@
+import { BaseElement } from './base-element.js'
+import { EVENTS } from '../utils/events.js'
+
+export class ProfileTab extends BaseElement {
+  constructor() {
+    super()
+    console.log('ProfileTab: Constructor called')
+    this.attachShadow({ mode: 'open' })
+    this._state = {
+      user: null,
+      walletAddress: null,
+      nfts: [],
+      listings: [],
+      purchases: [],
+      stats: null,
+      loading: true,
+      activeView: 'owned' // 'owned', 'listings', 'purchases'
+    }
+  }
+
+  connectedCallback() {
+    super.connectedCallback()
+    
+    // Check if frame provider already exists and has state
+    const frameProvider = document.querySelector('frame-provider')
+    if (frameProvider && frameProvider._state && !frameProvider._state.loading) {
+      // Frame is already initialized
+      const { user, isFrameContext } = frameProvider._state
+      console.log('Profile: Frame already initialized', { user, isFrameContext })
+      this.initialize(user)
+    } else {
+      // Wait for frame ready event
+      console.log('Profile: Waiting for frame ready event')
+      this.subscribe(EVENTS.FRAME_READY, async ({ user, isFrameContext }) => {
+        console.log('Profile: Frame ready event received', { user, isFrameContext })
+        await this.initialize(user)
+      })
+    }
+  }
+
+  async initialize(frameUser) {
+    // Get wallet address
+    let walletAddress = null
+    
+    if (frameUser?.address) {
+      // Use address from auth token
+      walletAddress = frameUser.address
+    } else {
+      // Try to get from frame SDK
+      const frameProvider = document.querySelector('frame-provider')
+      if (frameProvider) {
+        walletAddress = await frameProvider.getWalletAddress()
+      }
+    }
+    
+    // For development/testing, use your address if no wallet connected
+    if (!walletAddress) {
+      walletAddress = '0x0db12C0A67bc5B8942ea3126a465d7a0b23126C7'
+    }
+    
+    this.setState({ 
+      user: frameUser, 
+      walletAddress,
+      loading: true 
+    })
+    
+    // Fetch all data in parallel
+    await Promise.all([
+      this.fetchUserNFTs(walletAddress),
+      this.fetchUserListings(walletAddress),
+      this.fetchUserPurchases(walletAddress),
+      this.fetchUserStats(walletAddress)
+    ])
+    
+    this.setState({ loading: false })
+  }
+
+  async fetchUserNFTs(address) {
+    try {
+      const response = await fetch(`/api/users/${address}/nfts`)
+      const data = await response.json()
+      this.setState({ nfts: data.nfts || [] })
+    } catch (error) {
+      console.error('Failed to fetch NFTs:', error)
+      this.setState({ nfts: [] })
+    }
+  }
+
+  async fetchUserListings(address) {
+    try {
+      const response = await fetch(`/api/listings?seller=${address}`)
+      const data = await response.json()
+      console.log('Fetched listings data:', data)
+      this.setState({ listings: data.listings || [] })
+    } catch (error) {
+      console.error('Failed to fetch listings:', error)
+      this.setState({ listings: [] })
+    }
+  }
+
+  async fetchUserPurchases(address) {
+    try {
+      const response = await fetch(`/api/activity?actor=${address}&type=sale`)
+      const data = await response.json()
+      console.log('Fetched purchases data:', data)
+      this.setState({ purchases: data.activities || [] })
+    } catch (error) {
+      console.error('Failed to fetch purchases:', error)
+      this.setState({ purchases: [] })
+    }
+  }
+
+  async fetchUserStats(address) {
+    try {
+      const response = await fetch(`/api/users/${address}/stats`)
+      const data = await response.json()
+      this.setState({ stats: data })
+    } catch (error) {
+      console.error('Failed to fetch stats:', error)
+      this.setState({ stats: null })
+    }
+  }
+
+  getAvatarUrl() {
+    const { user } = this._state
+    if (user?.pfp_url) return user.pfp_url
+    return `https://api.dicebear.com/7.x/shapes/svg?seed=${this._state.walletAddress || 'default'}`
+  }
+
+  formatDate(dateString) {
+    const date = new Date(dateString)
+    const options = { month: 'short', day: 'numeric', year: 'numeric' }
+    return date.toLocaleDateString('en-US', options)
+  }
+
+  render() {
+    const styles = `
+      <style>
+        :host {
+          display: block;
+          font-family: "Spline Sans", "Noto Sans", sans-serif;
+          background: #f8fafc;
+          min-height: 100vh;
+          padding-bottom: 80px;
+        }
+        
+        /* Profile Header Section */
+        .profile-info {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 16px;
+          padding: 16px;
+        }
+        
+        .avatar {
+          width: 128px;
+          height: 128px;
+          border-radius: 50%;
+          background-size: cover;
+          background-position: center;
+          background-color: #e7edf4;
+        }
+        
+        .user-details {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 4px;
+        }
+        
+        .username {
+          color: #0d141c;
+          font-size: 22px;
+          font-weight: 700;
+          line-height: 1.2;
+          letter-spacing: -0.015em;
+          margin: 0;
+        }
+        
+        .wallet-address {
+          color: #49739c;
+          font-size: 16px;
+          font-weight: 400;
+          margin: 0;
+        }
+        
+        /* Stats Cards */
+        .stats-container {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          padding: 12px 16px;
+        }
+        
+        .stat-card {
+          flex: 1;
+          min-width: 111px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+          padding: 12px;
+          border: 1px solid #cedbe8;
+          border-radius: 8px;
+          background: white;
+        }
+        
+        .stat-value {
+          color: #0d141c;
+          font-size: 24px;
+          font-weight: 700;
+          line-height: 1.2;
+          margin: 0;
+        }
+        
+        .stat-label {
+          color: #49739c;
+          font-size: 14px;
+          font-weight: 400;
+          margin: 0;
+        }
+        
+        /* Tab Navigation */
+        .tabs-container {
+          padding-bottom: 12px;
+        }
+        
+        .tabs {
+          display: flex;
+          border-bottom: 1px solid #cedbe8;
+          padding: 0 16px;
+          gap: 32px;
+        }
+        
+        .tab {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 16px 0 13px;
+          border-bottom: 3px solid transparent;
+          background: none;
+          border-top: none;
+          border-left: none;
+          border-right: none;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        
+        .tab-label {
+          font-size: 14px;
+          font-weight: 700;
+          letter-spacing: 0.015em;
+          margin: 0;
+        }
+        
+        .tab.active {
+          border-bottom-color: #0c7ff2;
+        }
+        
+        .tab.active .tab-label {
+          color: #0d141c;
+        }
+        
+        .tab:not(.active) .tab-label {
+          color: #49739c;
+        }
+        
+        /* Content Grid */
+        .content-section {
+          padding: 16px;
+        }
+        
+        .nft-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+          gap: 12px;
+        }
+        
+        .nft-card {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          cursor: pointer;
+        }
+        
+        .nft-image {
+          width: 100%;
+          aspect-ratio: 1;
+          background-size: cover;
+          background-position: center;
+          background-color: #e7edf4;
+          border-radius: 8px;
+          transition: transform 0.2s;
+        }
+        
+        .nft-card:hover .nft-image {
+          transform: scale(1.02);
+        }
+        
+        /* Listings View */
+        .listings-container {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        
+        .listing-card {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 16px;
+          background: white;
+          border: 1px solid #cedbe8;
+          border-radius: 8px;
+          transition: all 0.2s;
+        }
+        
+        .listing-card:hover {
+          border-color: #b8c9dd;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+        
+        .listing-image {
+          width: 64px;
+          height: 64px;
+          border-radius: 8px;
+          background-size: cover;
+          background-position: center;
+          background-color: #e7edf4;
+          flex-shrink: 0;
+        }
+        
+        .listing-info {
+          flex: 1;
+          min-width: 0;
+        }
+        
+        .listing-title {
+          color: #0d141c;
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 4px 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        
+        .listing-price {
+          color: #0c7ff2;
+          font-size: 18px;
+          font-weight: 700;
+          margin: 0;
+        }
+        
+        .listing-actions {
+          display: flex;
+          gap: 8px;
+        }
+        
+        .listing-button {
+          padding: 8px 16px;
+          border-radius: 6px;
+          font-size: 14px;
+          font-weight: 600;
+          border: 1px solid #cedbe8;
+          background: white;
+          color: #49739c;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        
+        .listing-button:hover {
+          border-color: #0c7ff2;
+          color: #0c7ff2;
+        }
+        
+        .listing-button.cancel {
+          border-color: #ff4757;
+          color: #ff4757;
+        }
+        
+        .listing-button.cancel:hover {
+          background: #ff4757;
+          color: white;
+        }
+        
+        /* Purchases View */
+        .purchases-container {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          gap: 12px;
+        }
+        
+        .purchase-card {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 16px;
+          background: white;
+          border: 1px solid #cedbe8;
+          border-radius: 8px;
+          transition: all 0.2s;
+        }
+        
+        .purchase-card:hover {
+          border-color: #b8c9dd;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+        
+        .purchase-image {
+          width: 64px;
+          height: 64px;
+          border-radius: 8px;
+          background-size: cover;
+          background-position: center;
+          background-color: #e7edf4;
+          flex-shrink: 0;
+        }
+        
+        .purchase-info {
+          flex: 1;
+          min-width: 0;
+        }
+        
+        .purchase-title {
+          color: #0d141c;
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 4px 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        
+        .purchase-price {
+          color: #0c7ff2;
+          font-size: 16px;
+          font-weight: 700;
+          margin: 0 0 4px 0;
+        }
+        
+        .purchase-date {
+          color: #49739c;
+          font-size: 12px;
+          margin: 0;
+        }
+        
+        /* Loading State */
+        .loading {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 80px 20px;
+          color: #49739c;
+        }
+        
+        /* Empty State */
+        .empty-state {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 60px 20px;
+          gap: 12px;
+        }
+        
+        .empty-icon {
+          width: 64px;
+          height: 64px;
+          background: #e7edf4;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 8px;
+        }
+        
+        .empty-icon svg {
+          width: 32px;
+          height: 32px;
+          fill: #49739c;
+        }
+        
+        .empty-title {
+          color: #0d141c;
+          font-size: 18px;
+          font-weight: 600;
+          margin: 0;
+        }
+        
+        .empty-text {
+          color: #49739c;
+          font-size: 14px;
+          margin: 0;
+        }
+        
+      </style>
+    `
+
+    if (this._state.loading) {
+      this.shadowRoot.innerHTML = `
+        ${styles}
+        <div class="loading">
+          <p>Loading your profile...</p>
+        </div>
+      `
+      return
+    }
+
+    const { walletAddress, nfts, listings, purchases, stats, activeView, user } = this._state
+    const shortAddress = walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : 'Not connected'
+    const avatarUrl = this.getAvatarUrl()
+    
+    console.log('Profile render state:', { activeView, listings: listings.length, purchases: purchases.length })
+
+    this.shadowRoot.innerHTML = `
+      ${styles}
+      
+      <div class="profile-info">
+        <div class="avatar" style="background-image: url('${avatarUrl}')"></div>
+        <div class="user-details">
+          <h1 class="username">${user?.display_name || user?.username || 'Anonymous User'}</h1>
+          <p class="wallet-address">@${user?.username || shortAddress}</p>
+        </div>
+      </div>
+      
+      <div class="stats-container">
+        <div class="stat-card">
+          <p class="stat-value">${nfts.length}</p>
+          <p class="stat-label">Items</p>
+        </div>
+        <div class="stat-card">
+          <p class="stat-value">${stats?.total_sales || 0}</p>
+          <p class="stat-label">Sales</p>
+        </div>
+        <div class="stat-card">
+          <p class="stat-value">${stats?.active_listings || 0}</p>
+          <p class="stat-label">Listings</p>
+        </div>
+      </div>
+      
+      <div class="tabs-container">
+        <div class="tabs">
+          <button class="tab ${activeView === 'owned' ? 'active' : ''}" data-view="owned">
+            <p class="tab-label">Owned</p>
+          </button>
+          <button class="tab ${activeView === 'listings' ? 'active' : ''}" data-view="listings">
+            <p class="tab-label">Listings</p>
+          </button>
+          <button class="tab ${activeView === 'purchases' ? 'active' : ''}" data-view="purchases">
+            <p class="tab-label">Purchases</p>
+          </button>
+        </div>
+      </div>
+      
+      <div class="content-section">
+        ${activeView === 'owned' ? `
+          ${nfts.length > 0 ? `
+            <div class="nft-grid">
+              ${nfts.map(nft => `
+                <div class="nft-card" data-contract="${nft.contract.address}" data-token="${nft.tokenId}">
+                  <div class="nft-image" style="background-image: url('${nft.media[0]?.gateway || '/placeholder.png'}')"></div>
+                </div>
+              `).join('')}
+            </div>
+          ` : `
+            <div class="empty-state">
+              <div class="empty-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M224,48H32A8,8,0,0,0,24,56V192a8,8,0,0,0,8,8H224a8,8,0,0,0,8-8V56A8,8,0,0,0,224,48ZM40,172V152H216v20Zm0-36V120H216v16Zm0-32V84H216v20ZM216,68H40V64H216Z"></path>
+                </svg>
+              </div>
+              <h3 class="empty-title">No NFTs found</h3>
+              <p class="empty-text">NFTs you own on Base will appear here</p>
+            </div>
+          `}
+        ` : activeView === 'listings' ? `
+          ${listings.length > 0 ? `
+            <div class="listings-container">
+              ${listings.map(listing => `
+                <div class="listing-card" data-id="${listing.id}">
+                  <div class="listing-image" style="background-image: url('${listing.image || '/placeholder.png'}')"></div>
+                  <div class="listing-info">
+                    <h3 class="listing-title">${listing.name}</h3>
+                    <p class="listing-price">${listing.price} USDC</p>
+                  </div>
+                  <div class="listing-actions">
+                    <button class="listing-button" data-action="edit">Edit</button>
+                    <button class="listing-button cancel" data-action="cancel">Cancel</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : `
+            <div class="empty-state">
+              <div class="empty-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40Zm0,160H40V56H216V200ZM184,96a8,8,0,0,1-8,8H80a8,8,0,0,1,0-16h96A8,8,0,0,1,184,96Zm0,32a8,8,0,0,1-8,8H80a8,8,0,0,1,0-16h96A8,8,0,0,1,184,128Zm0,32a8,8,0,0,1-8,8H80a8,8,0,0,1,0-16h96A8,8,0,0,1,184,160Z"></path>
+                </svg>
+              </div>
+              <h3 class="empty-title">No active listings</h3>
+              <p class="empty-text">Your NFT listings will appear here</p>
+            </div>
+          `}
+        ` : `
+          ${purchases.length > 0 ? `
+            <div class="purchases-container">
+              ${purchases.map(purchase => `
+                <div class="purchase-card">
+                  <div class="purchase-image" style="background-image: url('${purchase.metadata?.image_url || '/placeholder.png'}')"></div>
+                  <div class="purchase-info">
+                    <h3 class="purchase-title">${purchase.metadata?.nft_name || 'NFT'}</h3>
+                    <p class="purchase-price">${purchase.metadata?.price || '0'} USDC</p>
+                    <p class="purchase-date">${this.formatDate(purchase.created_at)}</p>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          ` : `
+            <div class="empty-state">
+              <div class="empty-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm40-68a28,28,0,0,1-28,28h-4v8a8,8,0,0,1-16,0v-8H104a8,8,0,0,1,0-16h36a12,12,0,0,0,0-24H116a28,28,0,0,1,0-56h4V72a8,8,0,0,1,16,0v8h16a8,8,0,0,1,0,16H116a12,12,0,0,0,0,24h24A28,28,0,0,1,168,148Z"></path>
+                </svg>
+              </div>
+              <h3 class="empty-title">No purchases yet</h3>
+              <p class="empty-text">Your purchase history will appear here</p>
+            </div>
+          `}
+        `}
+      </div>
+    `
+  }
+
+  attachEventListeners() {
+    // Tab switching
+    const tabs = this.shadowRoot.querySelectorAll('.tab')
+    console.log('Found tabs:', tabs.length)
+    tabs.forEach(tab => {
+      this.on(tab, 'click', (e) => {
+        const view = e.currentTarget.dataset.view
+        console.log('Tab clicked:', view)
+        this.setState({ activeView: view })
+      })
+    })
+
+
+    // NFT cards
+    const nftCards = this.shadowRoot.querySelectorAll('.nft-card')
+    nftCards.forEach(card => {
+      this.on(card, 'click', (e) => {
+        const contract = e.currentTarget.dataset.contract
+        const tokenId = e.currentTarget.dataset.token
+        const nft = this._state.nfts.find(n => 
+          n.contract.address === contract && n.tokenId === tokenId
+        )
+        
+        // TODO: Open NFT detail modal or navigate to detail page
+        this.emit(EVENTS.NFT_SELECTED, { nft })
+      })
+    })
+
+    // Listing actions
+    const listingButtons = this.shadowRoot.querySelectorAll('.listing-button')
+    listingButtons.forEach(btn => {
+      this.on(btn, 'click', (e) => {
+        e.stopPropagation()
+        const action = e.currentTarget.dataset.action
+        const listingCard = e.currentTarget.closest('.listing-card')
+        const listingId = listingCard.dataset.id
+        const listing = this._state.listings.find(l => l.id === listingId)
+        
+        if (action === 'cancel') {
+          this.cancelListing(listing)
+        } else if (action === 'edit') {
+          this.emit(EVENTS.EDIT_LISTING, { listing })
+        }
+      })
+    })
+  }
+
+  async cancelListing(listing) {
+    if (!confirm(`Cancel listing for ${listing.name}?`)) return
+    
+    try {
+      // TODO: Call smart contract to cancel listing
+      // For now, just update database
+      const response = await fetch(`/api/listings/${listing.id}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${window.authToken}`
+        }
+      })
+      
+      if (response.ok) {
+        // Refresh listings
+        await this.fetchUserListings(this._state.walletAddress)
+      }
+    } catch (error) {
+      console.error('Failed to cancel listing:', error)
+    }
+  }
+}
+
+customElements.define('profile-tab', ProfileTab)
