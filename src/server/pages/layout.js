@@ -17,6 +17,7 @@ export const Layout = ({ children, title }) => html`
     <div id="app">
       ${children}
     </div>
+    <app-modal></app-modal>
   </body>
   </html>
 `

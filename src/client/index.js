@@ -12,6 +12,7 @@ import './components/activity-feed.js'
 import './components/create-listing.js'
 import './components/search-page.js'
 import './components/listing-details.js'
+import './components/modal.js'
 import { eventBus, EVENTS } from './utils/events.js'
 
 console.log('Client index loaded - all components imported')

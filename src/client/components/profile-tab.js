@@ -258,7 +258,7 @@ export class ProfileTab extends BaseElement {
           width: 128px;
           height: 128px;
           border-radius: 50%;
-          background-size: contain;
+          background-size: cover;
           background-repeat: no-repeat;
           background-position: center;
           background-color: #e7edf4;

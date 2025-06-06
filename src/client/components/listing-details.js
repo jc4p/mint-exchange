@@ -2,6 +2,7 @@ import { BaseElement } from './base-element.js'
 import { EVENTS } from '../utils/events.js'
 import { transactionManager } from '../utils/transactions.js'
 import { encodeNFTExchange } from '../utils/contract.js'
+import { showAlert, showConfirm } from './modal.js'
 
 export class ListingDetails extends BaseElement {
   constructor() {
@@ -126,7 +127,7 @@ export class ListingDetails extends BaseElement {
       if (!response.ok) {
         throw new Error('Failed to fetch listing details')
       }
-      const { listing } = await response.json()
+      const listing = await response.json()
 
       // First approve USDC
       if (actionBtn) {
@@ -168,7 +169,7 @@ export class ListingDetails extends BaseElement {
         actionBtn.disabled = false
         actionBtn.textContent = `Buy for $${listingData.price}`
       }
-      alert(error.message || 'Purchase failed. Please try again.')
+      await showAlert(error.message || 'Purchase failed. Please try again.', 'Purchase Failed')
     }
   }
   
@@ -176,7 +177,8 @@ export class ListingDetails extends BaseElement {
     const { listingData } = this._state
     if (!listingData) return
     
-    if (!confirm('Are you sure you want to cancel this listing?')) {
+    const confirmed = await showConfirm('Are you sure you want to cancel this listing?', 'Cancel Listing')
+    if (!confirmed) {
       return
     }
     
@@ -221,7 +223,7 @@ export class ListingDetails extends BaseElement {
         actionBtn.disabled = false
         actionBtn.textContent = 'Cancel Listing'
       }
-      alert(error.message || 'Failed to cancel listing. Please try again.')
+      await showAlert(error.message || 'Failed to cancel listing. Please try again.', 'Cancel Failed')
     }
   }
 }

@@ -1,6 +1,7 @@
 import { BaseElement } from './base-element.js'
 import { EVENTS } from '../utils/events.js'
 import { transactionManager } from '../utils/transactions.js'
+import { showAlert } from './modal.js'
 
 export class CreateListing extends BaseElement {
   constructor() {
