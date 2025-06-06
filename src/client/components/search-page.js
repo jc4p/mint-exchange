@@ -159,7 +159,8 @@ export class SearchPage extends BaseElement {
         .listing-image {
           width: 100%;
           aspect-ratio: 1;
-          background-size: cover;
+          background-size: contain;
+          background-repeat: no-repeat;
           background-position: center;
           background-color: #e7edf4;
         }
@@ -231,6 +232,62 @@ export class SearchPage extends BaseElement {
           font-size: 14px;
           margin: 0;
         }
+        
+        /* Skeleton Loading */
+        .skeleton-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+          gap: 16px;
+          padding: 16px;
+        }
+        
+        .skeleton-card {
+          background: white;
+          border: 1px solid #e7edf4;
+          border-radius: 12px;
+          overflow: hidden;
+        }
+        
+        .skeleton-image {
+          width: 100%;
+          aspect-ratio: 1;
+          background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+          background-size: 200% 100%;
+          animation: loading 1.5s infinite;
+        }
+        
+        .skeleton-info {
+          padding: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        
+        .skeleton-text {
+          height: 16px;
+          border-radius: 4px;
+          background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+          background-size: 200% 100%;
+          animation: loading 1.5s infinite;
+        }
+        
+        .skeleton-text.title {
+          width: 70%;
+          height: 20px;
+        }
+        
+        .skeleton-text.price {
+          width: 40%;
+        }
+        
+        .skeleton-text.seller {
+          width: 50%;
+        }
+        
+        @keyframes loading {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
       </style>
     `
 
@@ -267,8 +324,17 @@ export class SearchPage extends BaseElement {
       
       <div class="results-section">
         ${loading ? `
-          <div class="loading">
-            <p>Searching...</p>
+          <div class="skeleton-grid">
+            ${[...Array(6)].map(() => `
+              <div class="skeleton-card">
+                <div class="skeleton-image"></div>
+                <div class="skeleton-info">
+                  <div class="skeleton-text title"></div>
+                  <div class="skeleton-text price"></div>
+                  <div class="skeleton-text seller"></div>
+                </div>
+              </div>
+            `).join('')}
           </div>
         ` : hasSearched ? `
           ${searchResults.length > 0 ? `
@@ -311,17 +377,21 @@ export class SearchPage extends BaseElement {
   }
 
   attachEventListeners() {
-    // Search input
+    // Search input - uncontrolled with debounce
     const searchInput = this.shadowRoot.querySelector('.search-input')
     if (searchInput) {
       let searchTimeout
       this.on(searchInput, 'input', (e) => {
         const query = e.target.value
-        this.setState({ searchQuery: query })
+        
+        // Store query without re-rendering
+        this._searchQuery = query
         
         // Debounce search
         clearTimeout(searchTimeout)
         searchTimeout = setTimeout(() => {
+          // Only update state when actually searching
+          this.setState({ searchQuery: query })
           this.search()
         }, 500)
       })
@@ -344,8 +414,8 @@ export class SearchPage extends BaseElement {
     listingCards.forEach(card => {
       this.on(card, 'click', (e) => {
         const listingId = e.currentTarget.dataset.id
-        // TODO: Navigate to listing detail page
-        console.log('Navigate to listing:', listingId)
+        // Navigate to listing detail page
+        window.location.href = `/listing/${listingId}`
       })
     })
   }

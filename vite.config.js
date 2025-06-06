@@ -16,6 +16,13 @@ export default defineConfig({
           }
           return '[name][extname]'
         }
+      },
+      // Suppress noisy warnings from third-party dependencies (e.g. ox)
+      // about misplaced /*#__PURE__*/ annotations. These warnings are
+      // harmless and clutter the console during local development & CI.
+      onwarn(warning, warn) {
+        if (warning.code === 'INVALID_ANNOTATION') return
+        warn(warning)
       }
     }
   },

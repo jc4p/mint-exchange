@@ -1,0 +1,14 @@
+# Alchemy API key for NFT metadata and blockchain queries
+ALCHEMY_API_KEY=your_alchemy_api_key_here
+
+# Neynar API key for fetching Farcaster user profiles
+NEYNAR_API_KEY=your_neynar_api_key_here
+
+# Admin token for protected admin endpoints
+ADMIN_TOKEN=your_secure_admin_token_here
+
+# Domain for JWT verification (optional, defaults to request hostname)
+DOMAIN=localhost:8787
+
+# Alchemy webhook secret for signature verification (optional)
+ALCHEMY_WEBHOOK_SECRET=your_webhook_secret_here

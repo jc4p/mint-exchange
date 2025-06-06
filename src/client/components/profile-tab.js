@@ -8,12 +8,13 @@ export class ProfileTab extends BaseElement {
     this.attachShadow({ mode: 'open' })
     this._state = {
       user: null,
-      walletAddress: null,
+      fid: null,
       nfts: [],
       listings: [],
       purchases: [],
       stats: null,
       loading: true,
+      contentLoading: true, // Separate loading state for NFT content
       activeView: 'owned', // 'owned', 'listings', 'purchases'
       nftsPage: 1,
       nftsPerPage: 12,
@@ -24,75 +25,122 @@ export class ProfileTab extends BaseElement {
   connectedCallback() {
     super.connectedCallback()
     
-    // Check if frame provider already exists and has state
-    const frameProvider = document.querySelector('frame-provider')
-    if (frameProvider && frameProvider._state && !frameProvider._state.loading) {
-      // Frame is already initialized
-      const { user, isFrameContext } = frameProvider._state
-      console.log('Profile: Frame already initialized', { user, isFrameContext })
-      this.initialize(user)
+    console.log('Profile: Connected, checking auth status')
+    
+    // Always start with loading state
+    this.setState({ loading: true })
+    
+    // Check if we already have auth token
+    if (window.authToken) {
+      console.log('Profile: Auth token found, initializing')
+      this.initialize()
     } else {
-      // Wait for frame ready event
-      console.log('Profile: Waiting for frame ready event')
-      this.subscribe(EVENTS.FRAME_READY, async ({ user, isFrameContext }) => {
-        console.log('Profile: Frame ready event received', { user, isFrameContext })
-        await this.initialize(user)
-      })
+      console.log('Profile: No auth token, waiting for authentication')
+      // Keep loading state while auth happens
     }
+    
+    // Listen for auth success events to initialize
+    this.subscribe(EVENTS.AUTH_SUCCESS, async ({ user, token }) => {
+      console.log('Profile: Auth success, initializing')
+      await this.initialize()
+    })
     
     // Listen for listing created events to refresh data
     this.subscribe(EVENTS.LISTING_CREATED, async () => {
-      if (this._state.walletAddress) {
-        await this.fetchUserListings(this._state.walletAddress)
-        await this.fetchUserStats(this._state.walletAddress)
+      if (this._state.fid) {
+        await this.fetchUserListings()
+        await this.fetchUserStats()
       }
     })
   }
 
-  async initialize(frameUser) {
-    // Get wallet address
-    let walletAddress = null
+  async initialize() {
+    // Keep loading state until we have user data
     
-    if (frameUser?.address) {
-      // Use address from auth token
-      walletAddress = frameUser.address
+    // Fetch user data from API if we have auth token
+    if (window.authToken) {
+      try {
+        const response = await fetch('/api/users/me', {
+          headers: {
+            'Authorization': `Bearer ${window.authToken}`
+          }
+        })
+        if (response.ok) {
+          const userData = await response.json()
+          console.log('Fetched user data from /api/users/me:', userData)
+          
+          this.setState({ 
+            user: userData, 
+            fid: userData.fid,
+            loading: false,
+            contentLoading: true
+          })
+        } else {
+          console.error('Failed to fetch user profile:', response.status)
+          // Set default state without user data
+          this.setState({ 
+            user: null,
+            fid: null,
+            loading: false,
+            contentLoading: true
+          })
+        }
+      } catch (error) {
+        console.error('Failed to fetch user profile:', error)
+        this.setState({ 
+          user: null,
+          fid: null,
+          loading: false,
+          contentLoading: true
+        })
+      }
     } else {
-      // Try to get from frame SDK
-      const frameProvider = document.querySelector('frame-provider')
-      if (frameProvider) {
-        walletAddress = await frameProvider.getWalletAddress()
-      }
+      console.log('No auth token available')
+      // For development/testing, use a test FID if not available
+      this.setState({ 
+        user: null,
+        fid: 10000, // Test FID for development
+        loading: false,
+        contentLoading: true
+      })
     }
     
-    // For development/testing, use your address if no wallet connected
-    if (!walletAddress) {
-      walletAddress = '0x0db12C0A67bc5B8942ea3126a465d7a0b23126C7'
+    // Only fetch data if we have a valid FID
+    if (this._state.fid) {
+      // Fetch all data in parallel but don't wait for them
+      Promise.all([
+        this.fetchUserNFTs(),
+        this.fetchUserListings(),
+        this.fetchUserPurchases(),
+        this.fetchUserStats()
+      ]).then(() => {
+        this.setState({ contentLoading: false })
+      }).catch(error => {
+        console.error('Error fetching user data:', error)
+        this.setState({ contentLoading: false })
+      })
     }
-    
-    this.setState({ 
-      user: frameUser, 
-      walletAddress,
-      loading: true 
-    })
-    
-    // Fetch all data in parallel
-    await Promise.all([
-      this.fetchUserNFTs(walletAddress),
-      this.fetchUserListings(walletAddress),
-      this.fetchUserPurchases(walletAddress),
-      this.fetchUserStats(walletAddress)
-    ])
-    
-    this.setState({ loading: false })
   }
 
-  async fetchUserNFTs(address) {
+  async fetchUserNFTs() {
     try {
-      const response = await fetch(`/api/users/${address}/nfts`)
+      // If we have auth token, use /me endpoint
+      const url = window.authToken 
+        ? '/api/users/me/nfts'
+        : `/api/users/${this._state.fid}/nfts`
+      
+      const headers = window.authToken 
+        ? { 
+            'Authorization': `Bearer ${window.authToken}`,
+            'X-Wallet-Address': window.userWalletAddress || ''
+          }
+        : {}
+        
+      const response = await fetch(url, { headers })
       const data = await response.json()
       this.setState({ 
         nfts: data.nfts || [],
-        totalNfts: data.nfts?.length || 0
+        totalNfts: data.pagination?.total || data.nfts?.length || 0
       })
     } catch (error) {
       console.error('Failed to fetch NFTs:', error)
@@ -100,9 +148,18 @@ export class ProfileTab extends BaseElement {
     }
   }
 
-  async fetchUserListings(address) {
+  async fetchUserListings() {
     try {
-      const response = await fetch(`/api/listings?seller=${address}`)
+      // If we have auth token, use /me endpoint
+      const url = window.authToken 
+        ? '/api/listings/me'
+        : `/api/listings?seller_fid=${this._state.fid}`
+      
+      const headers = window.authToken 
+        ? { 'Authorization': `Bearer ${window.authToken}` }
+        : {}
+        
+      const response = await fetch(url, { headers })
       const data = await response.json()
       console.log('Fetched listings data:', data)
       this.setState({ listings: data.listings || [] })
@@ -112,9 +169,18 @@ export class ProfileTab extends BaseElement {
     }
   }
 
-  async fetchUserPurchases(address) {
+  async fetchUserPurchases() {
     try {
-      const response = await fetch(`/api/activity?actor=${address}&type=sale`)
+      // If we have auth token, use /me endpoint
+      const url = window.authToken 
+        ? '/api/activity/me?type=sale'
+        : `/api/activity?actor_fid=${this._state.fid}&type=sale`
+      
+      const headers = window.authToken 
+        ? { 'Authorization': `Bearer ${window.authToken}` }
+        : {}
+        
+      const response = await fetch(url, { headers })
       const data = await response.json()
       console.log('Fetched purchases data:', data)
       this.setState({ purchases: data.activities || [] })
@@ -124,9 +190,18 @@ export class ProfileTab extends BaseElement {
     }
   }
 
-  async fetchUserStats(address) {
+  async fetchUserStats() {
     try {
-      const response = await fetch(`/api/users/${address}/stats`)
+      // If we have auth token, use /me endpoint
+      const url = window.authToken 
+        ? '/api/users/me/stats'
+        : `/api/users/${this._state.fid}/stats`
+      
+      const headers = window.authToken 
+        ? { 'Authorization': `Bearer ${window.authToken}` }
+        : {}
+        
+      const response = await fetch(url, { headers })
       const data = await response.json()
       this.setState({ stats: data })
     } catch (error) {
@@ -137,8 +212,9 @@ export class ProfileTab extends BaseElement {
 
   getAvatarUrl() {
     const { user } = this._state
-    if (user?.pfp_url) return user.pfp_url
-    return `https://api.dicebear.com/7.x/shapes/svg?seed=${this._state.walletAddress || 'default'}`
+    // Now everything uses pfpUrl (camelCase)
+    if (user?.pfpUrl) return user.pfpUrl
+    return `https://api.dicebear.com/7.x/shapes/svg?seed=${this._state.fid || 'default'}`
   }
 
   formatDate(dateString) {
@@ -182,7 +258,8 @@ export class ProfileTab extends BaseElement {
           width: 128px;
           height: 128px;
           border-radius: 50%;
-          background-size: cover;
+          background-size: contain;
+          background-repeat: no-repeat;
           background-position: center;
           background-color: #e7edf4;
         }
@@ -213,14 +290,14 @@ export class ProfileTab extends BaseElement {
         /* Stats Cards */
         .stats-container {
           display: flex;
-          flex-wrap: wrap;
+          justify-content: center;
           gap: 12px;
           padding: 12px 16px;
         }
         
         .stat-card {
           flex: 1;
-          min-width: 111px;
+          max-width: 200px;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -322,10 +399,10 @@ export class ProfileTab extends BaseElement {
         .nft-image {
           width: 100%;
           aspect-ratio: 1;
-          background-size: cover;
+          background-size: contain;
+          background-repeat: no-repeat;
           background-position: center;
           background-color: #e7edf4;
-          cursor: pointer;
         }
         
         .nft-info {
@@ -384,6 +461,7 @@ export class ProfileTab extends BaseElement {
           border: 1px solid #cedbe8;
           border-radius: 8px;
           transition: all 0.2s;
+          cursor: pointer;
         }
         
         .listing-card:hover {
@@ -395,7 +473,8 @@ export class ProfileTab extends BaseElement {
           width: 64px;
           height: 64px;
           border-radius: 8px;
-          background-size: cover;
+          background-size: contain;
+          background-repeat: no-repeat;
           background-position: center;
           background-color: #e7edf4;
           flex-shrink: 0;
@@ -482,7 +561,8 @@ export class ProfileTab extends BaseElement {
           width: 64px;
           height: 64px;
           border-radius: 8px;
-          background-size: cover;
+          background-size: contain;
+          background-repeat: no-repeat;
           background-position: center;
           background-color: #e7edf4;
           flex-shrink: 0;
@@ -523,6 +603,66 @@ export class ProfileTab extends BaseElement {
           justify-content: center;
           padding: 80px 20px;
           color: #49739c;
+        }
+        
+        /* Skeleton Loading */
+        .skeleton-avatar {
+          width: 100px;
+          height: 100px;
+          border-radius: 50%;
+          background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+          background-size: 200% 100%;
+          animation: loading 1.5s infinite;
+          margin: 16px auto;
+        }
+        
+        .skeleton-text {
+          height: 20px;
+          border-radius: 4px;
+          background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+          background-size: 200% 100%;
+          animation: loading 1.5s infinite;
+          margin: 8px auto;
+        }
+        
+        .skeleton-text.title {
+          width: 150px;
+          height: 24px;
+        }
+        
+        .skeleton-text.subtitle {
+          width: 100px;
+          height: 16px;
+        }
+        
+        .skeleton-stat {
+          flex: 1;
+          max-width: 200px;
+          height: 80px;
+          border-radius: 8px;
+          background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+          background-size: 200% 100%;
+          animation: loading 1.5s infinite;
+        }
+        
+        .skeleton-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 12px;
+          padding: 16px;
+        }
+        
+        .skeleton-nft {
+          aspect-ratio: 1;
+          border-radius: 12px;
+          background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+          background-size: 200% 100%;
+          animation: loading 1.5s infinite;
+        }
+        
+        @keyframes loading {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
         }
         
         /* Empty State */
@@ -619,15 +759,40 @@ export class ProfileTab extends BaseElement {
     if (this._state.loading) {
       this.shadowRoot.innerHTML = `
         ${styles}
-        <div class="loading">
-          <p>Loading your profile...</p>
+        <div class="profile-info">
+          <div class="skeleton-avatar"></div>
+          <div class="user-details">
+            <div class="skeleton-text title"></div>
+            <div class="skeleton-text subtitle"></div>
+          </div>
+        </div>
+        
+        <div class="stats-container">
+          <div class="skeleton-stat"></div>
+        </div>
+        
+        <div class="tabs-container">
+          <div class="tabs">
+            <button class="tab active" disabled>
+              <p class="tab-label">Owned</p>
+            </button>
+            <button class="tab" disabled>
+              <p class="tab-label">Listings</p>
+            </button>
+            <button class="tab" disabled>
+              <p class="tab-label">Purchases</p>
+            </button>
+          </div>
+        </div>
+        
+        <div class="skeleton-grid">
+          ${[...Array(6)].map(() => `<div class="skeleton-nft"></div>`).join('')}
         </div>
       `
       return
     }
 
-    const { walletAddress, nfts, listings, purchases, stats, activeView, user, nftsPage } = this._state
-    const shortAddress = walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : 'Not connected'
+    const { fid, nfts, listings, purchases, stats, activeView, user, nftsPage, contentLoading } = this._state
     const avatarUrl = this.getAvatarUrl()
     const paginatedNfts = this.getPaginatedNfts()
     const totalPages = this.getTotalPages()
@@ -640,23 +805,15 @@ export class ProfileTab extends BaseElement {
       <div class="profile-info">
         <div class="avatar" style="background-image: url('${avatarUrl}')"></div>
         <div class="user-details">
-          <h1 class="username">${user?.display_name || user?.username || 'Anonymous User'}</h1>
-          <p class="wallet-address">@${user?.username || shortAddress}</p>
+          <h1 class="username">${user?.displayName || user?.username || 'Anonymous User'}</h1>
+          <p class="wallet-address">@${user?.username || `fid:${fid}`}</p>
         </div>
       </div>
       
       <div class="stats-container">
         <div class="stat-card">
-          <p class="stat-value">${nfts.length}</p>
-          <p class="stat-label">Items</p>
-        </div>
-        <div class="stat-card">
-          <p class="stat-value">${stats?.total_sales || 0}</p>
-          <p class="stat-label">Sales</p>
-        </div>
-        <div class="stat-card">
           <p class="stat-value">${stats?.active_listings || 0}</p>
-          <p class="stat-label">Listings</p>
+          <p class="stat-label">Active Listings</p>
         </div>
       </div>
       
@@ -675,7 +832,11 @@ export class ProfileTab extends BaseElement {
       </div>
       
       <div class="content-section">
-        ${activeView === 'owned' ? `
+        ${this._state.contentLoading ? `
+          <div class="skeleton-grid">
+            ${[...Array(4)].map(() => `<div class="skeleton-nft"></div>`).join('')}
+          </div>
+        ` : activeView === 'owned' ? `
           ${nfts.length > 0 ? `
             <div class="nft-grid">
               ${paginatedNfts.map(nft => `
@@ -833,22 +994,29 @@ export class ProfileTab extends BaseElement {
       })
     })
     
-    // Click on NFT image to view details
-    const nftImages = this.shadowRoot.querySelectorAll('.nft-image')
-    nftImages.forEach(img => {
-      this.on(img, 'click', (e) => {
-        const card = e.target.closest('.nft-card')
-        const contract = card.dataset.contract
-        const tokenId = card.dataset.token
-        const nft = this._state.nfts.find(n => 
-          n.contract.address === contract && n.tokenId === tokenId
-        )
+    // No click handler for NFT images - only the list button should be clickable
+
+    // Click on listing cards to view details
+    const listingCards = this.shadowRoot.querySelectorAll('.listing-card')
+    console.log('Found listing cards:', listingCards.length)
+    listingCards.forEach(card => {
+      this.on(card, 'click', (e) => {
+        // Don't trigger if clicking on buttons
+        if (e.target.closest('.listing-button')) return
         
-        // TODO: Open NFT detail modal or navigate to detail page
-        this.emit(EVENTS.NFT_SELECTED, { nft })
+        const listingId = card.dataset.id
+        console.log('Listing card clicked, ID:', listingId, 'type:', typeof listingId)
+        console.log('All listing IDs:', this._state.listings.map(l => ({ id: l.id, type: typeof l.id })))
+        const listing = this._state.listings.find(l => l.id == listingId) // Use == instead of === to handle type mismatch
+        console.log('Found listing:', listing)
+        
+        if (listing) {
+          console.log('Navigating to listing details:', listing)
+          window.location.href = `/listing/${listing.id}`
+        }
       })
     })
-
+    
     // Listing actions
     const listingButtons = this.shadowRoot.querySelectorAll('.listing-button')
     listingButtons.forEach(btn => {
@@ -883,7 +1051,7 @@ export class ProfileTab extends BaseElement {
       
       if (response.ok) {
         // Refresh listings
-        await this.fetchUserListings(this._state.walletAddress)
+        await this.fetchUserListings()
       }
     } catch (error) {
       console.error('Failed to cancel listing:', error)

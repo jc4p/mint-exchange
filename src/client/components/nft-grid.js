@@ -193,8 +193,8 @@ export class NFTGrid extends BaseElement {
     cards.forEach(card => {
       this.on(card, 'click', (e) => {
         const id = e.currentTarget.dataset.id
-        const nft = this._state.nfts.find(n => n.id === id)
-        this.emit(EVENTS.NFT_SELECTED, { id, nft })
+        // Navigate to listing details page
+        window.location.href = `/listing/${id}`
       })
     })
   }

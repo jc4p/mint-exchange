@@ -18,6 +18,12 @@
   background-color: var(--background-color);
 }
 
+/* When main-content is the first child (no header), remove top padding */
+.frame-provider > .main-content:first-child,
+frame-provider > .main-content:first-child {
+  padding-top: 0;
+}
+
 .container {
   width: 100%;
   max-width: 1200px;

@@ -1,5 +1,6 @@
 import { BaseElement } from './base-element.js'
 import { EVENTS } from '../utils/events.js'
+import { transactionManager } from '../utils/transactions.js'
 
 export class CreateListing extends BaseElement {
   constructor() {
@@ -16,6 +17,7 @@ export class CreateListing extends BaseElement {
       contractAddress: '',
       tokenId: ''
     }
+    this._priceDebounceTimer = null
   }
 
   connectedCallback() {
@@ -46,7 +48,11 @@ export class CreateListing extends BaseElement {
   }
 
   async submitListing() {
-    const { nft, price, expiryDays } = this._state
+    const { nft, expiryDays } = this._state
+    
+    // Get the price from the input directly
+    const priceInput = this.shadowRoot.querySelector('input[type="number"]')
+    const price = priceInput?.value || this._priceValue || ''
     
     if (!price || parseFloat(price) <= 0) {
       this.setState({ error: 'Please enter a valid price' })
@@ -56,11 +62,26 @@ export class CreateListing extends BaseElement {
     this.setState({ loading: true, error: null })
     
     try {
+      // Check network first
+      await transactionManager.checkNetwork()
+      
+      // Create listing on blockchain
+      console.log('Creating listing on blockchain...')
+      const txHash = await transactionManager.createListing(
+        nft.contract.address,
+        nft.tokenId,
+        parseFloat(price),
+        expiryDays,
+        false // Assuming ERC721 for now, can be enhanced to detect standard
+      )
+      
+      console.log('Transaction submitted:', txHash)
+      
       // Calculate expiry date
       const expiryDate = new Date()
       expiryDate.setDate(expiryDate.getDate() + expiryDays)
       
-      // Create listing via API
+      // Save listing to database for indexing
       const response = await fetch('/api/listings', {
         method: 'POST',
         headers: {
@@ -75,13 +96,15 @@ export class CreateListing extends BaseElement {
           metadata: {
             name: nft.title,
             description: nft.description,
-            image_url: nft.media[0]?.gateway || ''
-          }
+            image_url: nft.media[0]?.gateway || '',
+            metadata_uri: ''
+          },
+          txHash: txHash
         })
       })
       
       if (!response.ok) {
-        throw new Error('Failed to create listing')
+        console.error('Failed to save listing to database')
       }
       
       const data = await response.json()
@@ -90,13 +113,13 @@ export class CreateListing extends BaseElement {
       this.closeModal()
       this.emit(EVENTS.LISTING_CREATED, { listing: data })
       
-      // Show success message
-      alert('NFT listed successfully!')
+      // Show success message with transaction link
+      alert(`NFT listed successfully! Transaction: ${txHash}`)
       
     } catch (error) {
       console.error('Error creating listing:', error)
       this.setState({ 
-        error: 'Failed to create listing. Please try again.',
+        error: error.message || 'Failed to create listing. Please try again.',
         loading: false 
       })
     }
@@ -192,7 +215,8 @@ export class CreateListing extends BaseElement {
           width: 80px;
           height: 80px;
           border-radius: 8px;
-          background-size: cover;
+          background-size: contain;
+          background-repeat: no-repeat;
           background-position: center;
           background-color: #e7edf4;
           flex-shrink: 0;
@@ -391,9 +415,9 @@ export class CreateListing extends BaseElement {
                     type="number" 
                     class="form-input" 
                     placeholder="0.00"
-                    value="${price}"
                     step="0.01"
                     min="0"
+                    inputmode="decimal"
                   />
                   <span class="price-suffix">USDC</span>
                 </div>
@@ -450,11 +474,18 @@ export class CreateListing extends BaseElement {
       })
     }
 
-    // Price input
+    // Price input - uncontrolled component
     const priceInput = this.shadowRoot.querySelector('input[type="number"]')
     if (priceInput) {
+      // Just store the value internally without triggering re-render
       this.on(priceInput, 'input', (e) => {
-        this.setState({ price: e.target.value, error: null })
+        // Store the price value without setState
+        this._priceValue = e.target.value
+        
+        // Clear error if there was one
+        if (this._state.error) {
+          this.setState({ error: null })
+        }
       })
     }
 

@@ -41,6 +41,30 @@ export class FrameProvider extends BaseElement {
 
       if (isFrameContext) {
         await frame.sdk.actions.ready()
+        
+        // Get wallet address from ETH provider
+        let walletAddress = null
+        try {
+          const accounts = await frame.sdk.wallet.ethProvider.request({ method: 'eth_requestAccounts' })
+          walletAddress = accounts?.[0] || null
+          console.log('FrameProvider: Got wallet address:', walletAddress)
+          
+          // Store wallet address globally for API requests
+          window.userWalletAddress = walletAddress
+          
+          // Emit wallet address event
+          if (walletAddress) {
+            this.emit(EVENTS.WALLET_CONNECTED, { address: walletAddress })
+          }
+        } catch (error) {
+          console.error('Failed to get wallet address:', error)
+        }
+        
+        // Auto-authenticate if we have a user in frame context
+        if (user && !window.authToken) {
+          console.log('FrameProvider: Auto-authenticating user')
+          this.authenticate()
+        }
       }
       
       // Dispatch event for other components
@@ -103,7 +127,15 @@ export class FrameProvider extends BaseElement {
       const accounts = await frame.sdk.wallet.ethProvider.request({
         method: 'eth_requestAccounts'
       })
-      return accounts[0]
+      const address = accounts[0]
+      
+      // Store and emit wallet address
+      if (address) {
+        window.userWalletAddress = address
+        this.emit(EVENTS.WALLET_CONNECTED, { address })
+      }
+      
+      return address
     } catch (error) {
       console.error('Failed to get wallet address:', error)
       return null

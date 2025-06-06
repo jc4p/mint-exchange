@@ -15,6 +15,10 @@ export const EVENTS = {
   AUTH_FAILED: 'auth:failed',
   AUTH_LOGOUT: 'auth:logout',
   
+  // Wallet events
+  WALLET_CONNECTED: 'wallet:connected',
+  WALLET_DISCONNECTED: 'wallet:disconnected',
+  
   // Navigation events
   TAB_CHANGE: 'nav:tab-change',
   ROUTE_CHANGE: 'nav:route-change',

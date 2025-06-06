@@ -85,22 +85,57 @@ export class ActivityFeed extends BaseElement {
   }
 
   getActivityDescription(activity) {
-    const actor = activity.actor_display_name || activity.actor_username || `${activity.actor_address.slice(0, 6)}...${activity.actor_address.slice(-4)}`
-    const nftName = activity.metadata?.nft_name || 'NFT'
+    const actor = activity.display_name || activity.username || `User ${activity.actor_fid || 'Unknown'}`
+    
+    // Parse metadata if it's a string
+    let metadata = activity.metadata
+    if (typeof metadata === 'string') {
+      try {
+        metadata = JSON.parse(metadata)
+      } catch (e) {
+        metadata = {}
+      }
+    }
+    
+    // Use the nft_name from query or construct from token_id
+    const nftName = activity.nft_name || `#${activity.token_id || metadata?.token_id || 'Unknown'}`
+    const price = activity.price || metadata?.price || '0'
+    
+    // Format contract address to show collection name
+    const contractAddress = activity.nft_contract || ''
+    const shortContract = contractAddress ? `${contractAddress.slice(0, 6)}...${contractAddress.slice(-4)}` : ''
     
     switch(activity.type) {
       case 'listing_created':
-        return `${actor} listed ${nftName} for ${activity.metadata?.price || '0'} USDC`
+        return {
+          main: `${actor} listed ${nftName}`,
+          secondary: `${shortContract} • ${price} USDC`
+        }
       case 'sale':
-        return `${actor} bought ${nftName} for ${activity.metadata?.price || '0'} USDC`
+        return {
+          main: `${actor} bought ${nftName}`,
+          secondary: `${shortContract} • ${price} USDC`
+        }
       case 'offer_made':
-        return `${actor} made an offer of ${activity.metadata?.offer_amount || '0'} USDC on ${nftName}`
+        return {
+          main: `${actor} made an offer on ${nftName}`,
+          secondary: `${shortContract} • ${metadata?.offer_amount || '0'} USDC`
+        }
       case 'offer_accepted':
-        return `${actor} accepted an offer on ${nftName}`
+        return {
+          main: `${actor} accepted an offer on ${nftName}`,
+          secondary: shortContract
+        }
       case 'listing_cancelled':
-        return `${actor} cancelled listing for ${nftName}`
+        return {
+          main: `${actor} cancelled listing for ${nftName}`,
+          secondary: shortContract
+        }
       default:
-        return `${actor} performed an action`
+        return {
+          main: `${actor} performed an action`,
+          secondary: ''
+        }
     }
   }
 
@@ -227,11 +262,23 @@ export class ActivityFeed extends BaseElement {
           margin: 0;
         }
         
-        .activity-image {
-          width: 40px;
-          height: 40px;
+        .activity-nft-image {
+          width: 48px;
+          height: 48px;
           border-radius: 8px;
-          background-size: cover;
+          background-size: contain;
+          background-repeat: no-repeat;
+          background-position: center;
+          background-color: #e7edf4;
+          flex-shrink: 0;
+        }
+        
+        .activity-user-image {
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          background-size: contain;
+          background-repeat: no-repeat;
           background-position: center;
           background-color: #e7edf4;
           flex-shrink: 0;
@@ -268,6 +315,63 @@ export class ActivityFeed extends BaseElement {
           justify-content: center;
           padding: 80px 20px;
           color: #49739c;
+        }
+        
+        /* Skeleton Loading */
+        .skeleton-container {
+          display: flex;
+          flex-direction: column;
+          gap: 0;
+        }
+        
+        .skeleton-item {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 16px;
+          border-bottom: 1px solid #e7edf4;
+        }
+        
+        .skeleton-nft-image {
+          width: 48px;
+          height: 48px;
+          border-radius: 8px;
+          background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+          background-size: 200% 100%;
+          animation: loading 1.5s infinite;
+        }
+        
+        .skeleton-content {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        
+        .skeleton-text {
+          height: 16px;
+          border-radius: 4px;
+          background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+          background-size: 200% 100%;
+          animation: loading 1.5s infinite;
+        }
+        
+        .skeleton-text.short {
+          width: 40%;
+        }
+        
+        .skeleton-image {
+          width: 40px;
+          height: 40px;
+          border-radius: 8px;
+          background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+          background-size: 200% 100%;
+          animation: loading 1.5s infinite;
+        }
+        
+        @keyframes loading {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
         }
         
         /* Empty State */
@@ -315,8 +419,23 @@ export class ActivityFeed extends BaseElement {
     if (this._state.loading && this._state.page === 1) {
       this.shadowRoot.innerHTML = `
         ${styles}
-        <div class="loading">
-          <p>Loading activity...</p>
+        <div class="filter-tabs">
+          <button class="filter-tab active" disabled>All Activity</button>
+          <button class="filter-tab" disabled>New Listings</button>
+          <button class="filter-tab" disabled>Sales</button>
+          <button class="filter-tab" disabled>Offers</button>
+        </div>
+        <div class="skeleton-container">
+          ${[...Array(8)].map(() => `
+            <div class="skeleton-item">
+              <div class="skeleton-nft-image"></div>
+              <div class="skeleton-content">
+                <div class="skeleton-text"></div>
+                <div class="skeleton-text short"></div>
+              </div>
+              <div class="skeleton-image"></div>
+            </div>
+          `).join('')}
         </div>
       `
       return
@@ -346,19 +465,32 @@ export class ActivityFeed extends BaseElement {
         ${activities.length > 0 ? activities.map(activity => {
           const iconColor = this.getActivityColor(activity.type)
           
+          // Parse metadata to get listing_id
+          let metadata = activity.metadata
+          if (typeof metadata === 'string') {
+            try {
+              metadata = JSON.parse(metadata)
+            } catch (e) {
+              metadata = {}
+            }
+          }
+          
+          // Use image_url from query result or fallback to metadata
+          const nftImage = activity.image_url || metadata?.image_url || '/placeholder.png'
+          const listingId = metadata?.listing_id || null
+          
           return `
-            <div class="activity-item" data-id="${activity.id}">
-              <div class="activity-icon" style="background-color: ${iconColor}20;">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="${iconColor}" viewBox="0 0 256 256">
-                  <path d="${this.getActivityIcon(activity.type)}"></path>
-                </svg>
-              </div>
+            <div class="activity-item" data-id="${activity.id}" ${listingId ? `data-listing-id="${listingId}"` : ''}>
+              <div class="activity-nft-image" style="background-image: url('${nftImage}')"></div>
               <div class="activity-details">
-                <p class="activity-description">${this.getActivityDescription(activity)}</p>
-                <p class="activity-time">${this.formatTime(activity.created_at)}</p>
+                <p class="activity-description">${this.getActivityDescription(activity).main}</p>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <p class="activity-time">${this.getActivityDescription(activity).secondary}</p>
+                  <p class="activity-time">• ${this.formatTime(activity.created_at)}</p>
+                </div>
               </div>
-              ${activity.metadata?.image_url ? `
-                <div class="activity-image" style="background-image: url('${activity.metadata.image_url}')"></div>
+              ${activity.pfp_url ? `
+                <div class="activity-user-image" style="background-image: url('${activity.pfp_url}')"></div>
               ` : ''}
             </div>
           `
@@ -407,15 +539,11 @@ export class ActivityFeed extends BaseElement {
     const activityItems = this.shadowRoot.querySelectorAll('.activity-item')
     activityItems.forEach(item => {
       this.on(item, 'click', (e) => {
-        const activityId = e.currentTarget.dataset.id
-        const activity = this._state.activities.find(a => a.id === activityId)
+        const listingId = e.currentTarget.dataset.listingId
         
-        // Navigate to relevant page based on activity type
-        if (activity.metadata?.listing_id) {
-          window.location.href = `/listing/${activity.metadata.listing_id}`
-        } else if (activity.metadata?.nft_contract && activity.metadata?.token_id) {
-          // TODO: Navigate to NFT details page
-          console.log('Navigate to NFT:', activity.metadata)
+        // Navigate to listing page if we have a listing ID
+        if (listingId) {
+          window.location.href = `/listing/${listingId}`
         }
       })
     })

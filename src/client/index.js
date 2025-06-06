@@ -4,12 +4,14 @@ import './components/frame-provider.js'
 import './components/auth-button.js'
 import './components/nav-tabs.js'
 import './components/nft-grid.js'
+// import './components/nft-details.js' // Removed - using deeplinked pages now
 import './components/featured-section.js'
 import './components/latest-section.js'
 import './components/profile-tab.js'
 import './components/activity-feed.js'
 import './components/create-listing.js'
 import './components/search-page.js'
+import './components/listing-details.js'
 import { eventBus, EVENTS } from './utils/events.js'
 
 console.log('Client index loaded - all components imported')
@@ -44,10 +46,7 @@ eventBus.on(EVENTS.TAB_CHANGE, ({ tab }) => {
   }
 })
 
-eventBus.on(EVENTS.NFT_SELECTED, ({ id, nft }) => {
-  console.log('NFT selected:', id, nft)
-  // TODO: Navigate to NFT details or open purchase modal
-})
+// NFT_SELECTED event removed - using deeplinked pages now
 
 eventBus.on(EVENTS.FRAME_READY, (data) => {
   console.log('Frame ready:', data)

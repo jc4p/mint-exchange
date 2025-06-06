@@ -27,7 +27,10 @@ bucket_name = "nft-exchange-images"
 
 # Environment Variables
 [vars]
-# Base RPC URL
-BASE_RPC_URL = "https://mainnet.base.org"
-# Smart contract address (to be deployed)
-CONTRACT_ADDRESS = ""
+CONTRACT_ADDRESS = "0x06fB7424Ba65D587405b9C754Bc40dA9398B72F0"
+USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+
+# Scheduled Workers (Cron Triggers)
+# Run the event indexer every 5 minutes
+[triggers]
+crons = ["*/5 * * * *"]
