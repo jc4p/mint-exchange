@@ -51,7 +51,7 @@ export async function homePage(c) {
         contract_address: listings[0].contractAddress,
         listing_count: 5,
         name: 'Cool NFT Collection',
-        sample_listings: listings.slice(0, 4).map(l => ({
+        sample_listings: listings.slice(0, 1).map(l => ({
           id: l.id,
           name: l.name,
           image_url: l.image,
@@ -78,7 +78,7 @@ export async function homePage(c) {
                   </div>
                   <div class="collection-preview">
                     ${featuredCollection.sample_listings.map((listing, index) => `
-                      <div class="preview-item" style="${index >= 2 ? 'display: none;' : ''}">
+                      <div class="preview-item" style="${index >= 1 ? 'display: none;' : ''}">
                         <div class="preview-image" style="background-image: url('${listing.image_url}')"></div>
                         <div class="preview-info">
                           <p class="preview-name">${listing.name}</p>
@@ -106,7 +106,7 @@ export async function homePage(c) {
                   <div class="latest-info">
                     <p class="latest-label">${index % 3 === 0 ? 'Trending' : index % 3 === 1 ? 'New' : 'Popular'}</p>
                     <p class="latest-title">${nft.name}</p>
-                    <p class="latest-description">${nft.price} USDC</p>
+                    <p class="latest-description">$${nft.price} USDC</p>
                   </div>
                 </div>
               `).join(''))}

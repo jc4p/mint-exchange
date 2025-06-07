@@ -1,7 +1,7 @@
 import { BaseElement } from './base-element.js'
 import { EVENTS } from '../utils/events.js'
 import { transactionManager } from '../utils/transactions.js'
-import { showAlert } from './modal.js'
+import { showAlert, showSuccess } from './modal.js'
 
 export class CreateListing extends BaseElement {
   constructor() {
@@ -31,6 +31,9 @@ export class CreateListing extends BaseElement {
   }
 
   openModal(nft) {
+    // Reset the price value
+    this._priceValue = ''
+    
     this.setState({
       isOpen: true,
       nft,
@@ -114,8 +117,13 @@ export class CreateListing extends BaseElement {
       this.closeModal()
       this.emit(EVENTS.LISTING_CREATED, { listing: data })
       
-      // Show success message with transaction link
-      alert(`NFT listed successfully! Transaction: ${txHash}`)
+      // Show success message with option to view listing
+      showSuccess(
+        'Your NFT has been listed successfully!',
+        'Listing Created',
+        'View Listing',
+        () => window.location.href = `/listing/${data.id}`
+      )
       
     } catch (error) {
       console.error('Error creating listing:', error)
@@ -448,7 +456,7 @@ export class CreateListing extends BaseElement {
               <button class="button button-secondary" ${loading ? 'disabled' : ''}>
                 Cancel
               </button>
-              <button class="button button-primary" ${loading || !price ? 'disabled' : ''}>
+              <button class="button button-primary" disabled>
                 ${loading ? 'Listing...' : 'List NFT'}
               </button>
             </div>
@@ -486,6 +494,13 @@ export class CreateListing extends BaseElement {
         // Clear error if there was one
         if (this._state.error) {
           this.setState({ error: null })
+        }
+        
+        // Update submit button state
+        const submitBtn = this.shadowRoot.querySelector('.button-primary')
+        if (submitBtn) {
+          const hasValidPrice = e.target.value && parseFloat(e.target.value) > 0
+          submitBtn.disabled = this._state.loading || !hasValidPrice
         }
       })
     }

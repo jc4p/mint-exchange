@@ -202,6 +202,24 @@ export function showAlert(message, title = 'Alert') {
   })
 }
 
+export function showSuccess(message, title = 'Success', actionText = 'View Listing', onAction = null) {
+  const modal = document.querySelector('app-modal') || createModal()
+  return new Promise((resolve) => {
+    modal.show({
+      type: 'confirm', // Use 'confirm' type to show both buttons
+      title,
+      message,
+      confirmText: actionText,
+      cancelText: 'Close',
+      onConfirm: () => {
+        if (onAction) onAction()
+        resolve(true)
+      },
+      onCancel: () => resolve(false)
+    })
+  })
+}
+
 export function showConfirm(message, title = 'Confirm') {
   const modal = document.querySelector('app-modal') || createModal()
   return new Promise((resolve) => {

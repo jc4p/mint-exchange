@@ -1,6 +1,7 @@
 import { parseAbi, decodeEventLog } from 'viem'
 import { createRpcClient } from './utils/rpc-client.js'
 import { NeynarService } from './neynar.js'
+import { fetchNFTMetadata } from './utils/metadata.js'
 
 // Contract configuration
 const CONTRACT_ADDRESS = '0x06fB7424Ba65D587405b9C754Bc40dA9398B72F0'
@@ -112,37 +113,13 @@ export class BlockchainService {
       }
     }
 
-    // Fetch metadata if URI is provided
-    let metadata = {}
-    if (metadataURI && metadataURI !== '') {
-      try {
-        // Convert IPFS URLs to use a gateway
-        let fetchUrl = metadataURI
-        if (metadataURI.startsWith('ipfs://')) {
-          // Extract the IPFS hash and path
-          const ipfsPath = metadataURI.replace('ipfs://', '')
-          // Use a reliable IPFS gateway (you can also use ipfs.io, cloudflare-ipfs.com, etc.)
-          fetchUrl = `https://gateway.pinata.cloud/ipfs/${ipfsPath}`
-        }
-        
-        console.log('Fetching metadata from:', fetchUrl)
-        const response = await fetch(fetchUrl)
-        metadata = await response.json()
-        
-        // Also convert image URLs if they're IPFS
-        if (metadata.image && metadata.image.startsWith('ipfs://')) {
-          const imageIpfsPath = metadata.image.replace('ipfs://', '')
-          metadata.image = `https://gateway.pinata.cloud/ipfs/${imageIpfsPath}`
-        }
-      } catch (error) {
-        console.error('Failed to fetch metadata:', error)
-        // Default metadata on error
-        metadata = {
-          name: `NFT #${tokenId}`,
-          description: 'Metadata unavailable'
-        }
-      }
-    }
+    // Fetch metadata using unified utility
+    const metadata = await fetchNFTMetadata(
+      this.env,
+      nftContract,
+      tokenId.toString(),
+      metadataURI
+    )
 
     // Create listing in database
     await db.createListing({
@@ -153,8 +130,8 @@ export class BlockchainService {
       token_id: tokenId.toString(),
       price: Number(price) / 1e6, // Convert from USDC decimals
       expiry: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Default 7 days
-      metadata_uri: metadataURI || '',
-      image_url: metadata.image || '',
+      metadata_uri: metadata.metadata_uri || metadataURI || '',
+      image_url: metadata.image_url || '',
       name: metadata.name || `NFT #${tokenId}`,
       description: metadata.description || '',
       tx_hash: event.transactionHash

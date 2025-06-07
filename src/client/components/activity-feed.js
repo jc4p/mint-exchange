@@ -456,9 +456,6 @@ export class ActivityFeed extends BaseElement {
         <button class="filter-tab ${filter === 'sale' ? 'active' : ''}" data-filter="sale">
           Sales
         </button>
-        <button class="filter-tab ${filter === 'offer_made' ? 'active' : ''}" data-filter="offer_made">
-          Offers
-        </button>
       </div>
       
       <div class="activity-list">

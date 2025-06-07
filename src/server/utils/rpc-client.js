@@ -23,6 +23,30 @@ export function createRpcClient(env) {
 }
 
 /**
+ * Wait for a transaction to be available and get it
+ * Retries up to maxAttempts times with a delay between attempts
+ */
+export async function waitForAndGetTransaction(client, hash, maxAttempts = 10, delayMs = 200) {
+  console.log(`Waiting for transaction ${hash} to be available...`)
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const transaction = await client.getTransaction({ hash })
+      console.log(`Transaction found on attempt ${attempt}`)
+      return transaction
+    } catch (error) {
+      if (attempt === maxAttempts) {
+        console.error(`Transaction not found after ${maxAttempts} attempts`)
+        throw error
+      }
+      
+      console.log(`Transaction not found on attempt ${attempt}, retrying in ${delayMs}ms...`)
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+    }
+  }
+}
+
+/**
  * Proxy a JSON-RPC request through our configured RPC endpoint
  */
 export async function proxyRpcRequest(env, { method, params, id = 1, jsonrpc = '2.0' }) {

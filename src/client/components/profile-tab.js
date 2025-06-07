@@ -1,5 +1,6 @@
 import { BaseElement } from './base-element.js'
 import { EVENTS } from '../utils/events.js'
+import { showAlert, showConfirm } from './modal.js'
 
 export class ProfileTab extends BaseElement {
   constructor() {
@@ -896,10 +897,6 @@ export class ProfileTab extends BaseElement {
                     <h3 class="listing-title">${listing.name}</h3>
                     <p class="listing-price">${listing.price} USDC</p>
                   </div>
-                  <div class="listing-actions">
-                    <button class="listing-button" data-action="edit">Edit</button>
-                    <button class="listing-button cancel" data-action="cancel">Cancel</button>
-                  </div>
                 </div>
               `).join('')}
             </div>
@@ -1002,7 +999,7 @@ export class ProfileTab extends BaseElement {
     listingCards.forEach(card => {
       this.on(card, 'click', (e) => {
         // Don't trigger if clicking on buttons
-        if (e.target.closest('.listing-button')) return
+        // if (e.target.closest('.listing-button')) return
         
         const listingId = card.dataset.id
         console.log('Listing card clicked, ID:', listingId, 'type:', typeof listingId)
@@ -1018,26 +1015,26 @@ export class ProfileTab extends BaseElement {
     })
     
     // Listing actions
-    const listingButtons = this.shadowRoot.querySelectorAll('.listing-button')
-    listingButtons.forEach(btn => {
-      this.on(btn, 'click', (e) => {
-        e.stopPropagation()
-        const action = e.currentTarget.dataset.action
-        const listingCard = e.currentTarget.closest('.listing-card')
-        const listingId = listingCard.dataset.id
-        const listing = this._state.listings.find(l => l.id === listingId)
+    // const listingButtons = this.shadowRoot.querySelectorAll('.listing-button')
+    // listingButtons.forEach(btn => {
+    //   this.on(btn, 'click', (e) => {
+    //     e.stopPropagation()
+    //     const action = e.currentTarget.dataset.action
+    //     const listingCard = e.currentTarget.closest('.listing-card')
+    //     const listingId = listingCard.dataset.id
+    //     const listing = this._state.listings.find(l => l.id === listingId)
         
-        if (action === 'cancel') {
-          this.cancelListing(listing)
-        } else if (action === 'edit') {
-          this.emit(EVENTS.EDIT_LISTING, { listing })
-        }
-      })
-    })
+    //     if (action === 'cancel') {
+    //       this.cancelListing(listing)
+    //     } else if (action === 'edit') {
+    //       this.emit(EVENTS.EDIT_LISTING, { listing })
+    //     }
+    //   })
+    // })
   }
 
   async cancelListing(listing) {
-    if (!confirm(`Cancel listing for ${listing.name}?`)) return
+    if (!await showConfirm(`Cancel listing for ${listing.name}?`, 'Cancel Listing')) return
     
     try {
       // TODO: Call smart contract to cancel listing

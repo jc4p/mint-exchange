@@ -105,15 +105,13 @@ export const authMiddleware = (options = {}) => {
  */
 export const adminAuth = () => {
   return async (c, next) => {
-    const authorization = c.req.header('Authorization')
+    const authorization = c.req.header('X-Admin-Token')
     
-    if (!authorization || !authorization.startsWith('Bearer ')) {
+    if (!authorization) {
       return c.json({ error: 'Unauthorized - Admin access required' }, 401)
     }
     
-    const token = authorization.split(' ')[1]
-    
-    if (token !== c.env.ADMIN_TOKEN) {
+    if (authorization !== c.env.ADMIN_TOKEN) {
       return c.json({ error: 'Invalid admin token' }, 401)
     }
     

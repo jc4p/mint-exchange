@@ -2,6 +2,7 @@ import { BaseElement } from './base-element.js'
 import { EVENTS } from '../utils/events.js'
 import { transactionManager } from '../utils/transactions.js'
 import { frameUtils } from './frame-provider.js'
+import { showAlert } from './modal.js'
 
 export class NFTDetails extends BaseElement {
   constructor() {
@@ -93,7 +94,7 @@ export class NFTDetails extends BaseElement {
       console.log('Transaction submitted:', txHash)
       
       // Update UI
-      alert(`Purchase successful! Transaction: ${txHash}`)
+      await showAlert(`Purchase successful! Transaction: ${txHash}`, 'Purchase Complete')
       this.closeModal()
       
       // Emit event for other components to refresh

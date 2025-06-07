@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { Database } from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
+import { fetchNFTMetadata } from '../utils/metadata.js'
 
 const listings = new Hono()
 
@@ -185,10 +186,32 @@ listings.post('/', authMiddleware(), async (c) => {
     }
     
     // Get seller address from the transaction
-    const { createRpcClient } = await import('../utils/rpc-client.js')
+    const { createRpcClient, waitForAndGetTransaction } = await import('../utils/rpc-client.js')
     const client = createRpcClient(c.env)
-    const tx = await client.getTransaction({ hash: body.txHash })
+    const tx = await waitForAndGetTransaction(client, body.txHash)
     const sellerAddress = tx.from
+    
+    // Fetch metadata if not provided or incomplete
+    let metadata = body.metadata || {}
+    if (!metadata.image_url || !metadata.name) {
+      console.log('Fetching metadata for listing...')
+      const fetchedMetadata = await fetchNFTMetadata(
+        c.env,
+        body.nftContract,
+        body.tokenId,
+        metadata.metadata_uri
+      )
+      
+      if (fetchedMetadata.success) {
+        metadata = {
+          metadata_uri: fetchedMetadata.metadata_uri,
+          image_url: fetchedMetadata.image_url,
+          name: fetchedMetadata.name,
+          description: fetchedMetadata.description,
+          ...metadata // Keep any existing metadata that was passed
+        }
+      }
+    }
     
     // Create listing in database - let the DB handle the auto-increment ID
     const result = await db.createListing({
@@ -199,10 +222,10 @@ listings.post('/', authMiddleware(), async (c) => {
       token_id: body.tokenId,
       price: body.price,
       expiry: body.expiry,
-      metadata_uri: body.metadata?.metadata_uri || '',
-      image_url: body.metadata?.image_url || '',
-      name: body.metadata?.name || 'Untitled NFT',
-      description: body.metadata?.description || '',
+      metadata_uri: metadata.metadata_uri || '',
+      image_url: metadata.image_url || '',
+      name: metadata.name || `Token #${body.tokenId}`,
+      description: metadata.description || '',
       tx_hash: body.txHash
     })
     
@@ -245,9 +268,9 @@ listings.delete('/:id', authMiddleware(), async (c) => {
     }
     
     // Get canceller address from the transaction
-    const { createRpcClient } = await import('../utils/rpc-client.js')
+    const { createRpcClient, waitForAndGetTransaction } = await import('../utils/rpc-client.js')
     const client = createRpcClient(c.env)
-    const tx = await client.getTransaction({ hash: txHash })
+    const tx = await waitForAndGetTransaction(client, txHash)
     const cancellerAddress = tx.from
     
     // Cancel the listing

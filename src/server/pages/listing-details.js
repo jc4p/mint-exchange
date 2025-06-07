@@ -1,5 +1,6 @@
 import { html, raw } from 'hono/html'
 import { Layout } from './layout.js'
+import { fetchNFTMetadata } from '../utils/metadata.js'
 
 export async function listingDetailsPage(c) {
   const listingId = c.req.param('id')
@@ -24,40 +25,22 @@ export async function listingDetailsPage(c) {
       
       listing = result
       
-      // Fetch and parse metadata if available
-      if (listing && listing.metadata_uri) {
-        try {
-          let metadataUrl = listing.metadata_uri
-          
-          // Handle IPFS URIs
-          if (metadataUrl.startsWith('ipfs://')) {
-            metadataUrl = `https://gateway.pinata.cloud/ipfs/${metadataUrl.replace('ipfs://', '')}`
-          }
-          
-          const metadataResponse = await fetch(metadataUrl)
-          if (metadataResponse.ok) {
-            const metadata = await metadataResponse.json()
-            
-            // Extract attributes
-            if (metadata.attributes && Array.isArray(metadata.attributes)) {
-              nftAttributes = metadata.attributes
-            }
-            
-            // Update listing with additional metadata if available
-            if (metadata.name && !listing.name) {
-              listing.name = metadata.name
-            }
-            if (metadata.description && !listing.description) {
-              listing.description = metadata.description
-            }
-            if (metadata.image && !listing.image_url) {
-              listing.image_url = metadata.image.startsWith('ipfs://') 
-                ? `https://gateway.pinata.cloud/ipfs/${metadata.image.replace('ipfs://', '')}`
-                : metadata.image
-            }
-          }
-        } catch (error) {
-          console.error('Error fetching metadata:', error)
+      // Fetch complete metadata if missing or incomplete
+      if (listing && (!listing.image_url || !listing.name || listing.metadata_uri)) {
+        const metadata = await fetchNFTMetadata(
+          c.env,
+          listing.nft_contract,
+          listing.token_id,
+          listing.metadata_uri
+        )
+        
+        if (metadata.success) {
+          // Update listing with fetched metadata
+          listing.name = listing.name || metadata.name
+          listing.description = listing.description || metadata.description
+          listing.image_url = listing.image_url || metadata.image_url
+          listing.metadata_uri = metadata.metadata_uri
+          nftAttributes = metadata.attributes || []
         }
       }
     } catch (error) {
