@@ -415,89 +415,35 @@ admin.post('/generate-share-images', async (c) => {
     const { limit = 10, regenerate = false } = body
     
     const shareImageQueue = new ShareImageQueue(c.env)
+
+    // Queue share image generation for listings that don't have them (backfill)
+    const db = new Database(c.env.DB)
+    const listings = await db.db
+      .prepare(`
+        SELECT id
+        FROM listings
+        WHERE share_image_url IS NULL
+        AND cancelled_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT ?
+      `)
+      .bind(limit)
+      .all()
     
-    if (regenerate) {
-      // Regenerate share images for listings that already have them
-      const db = new Database(c.env.DB)
-      const listings = await db.db
-        .prepare(`
-          SELECT id, share_image_url
-          FROM listings
-          WHERE share_image_url IS NOT NULL
-          AND cancelled_at IS NULL
-          ORDER BY created_at DESC
-          LIMIT ?
-        `)
-        .bind(limit)
-        .all()
-      
-      const results = []
-      
-      // Clear existing share images and regenerate
-      for (const listing of listings.results) {
-        try {
-          // Clear from KV cache
-          const cacheKey = `share-image:${listing.id}`
-          await c.env.MINT_EXCHANGE_BROWSER_KV.delete(cacheKey)
-          
-          // Clear from database to force regeneration
-          await db.db
-            .prepare('UPDATE listings SET share_image_url = NULL WHERE id = ?')
-            .bind(listing.id)
-            .run()
-          
-          // Regenerate the image
-          await shareImageQueue.generateShareImage(listing.id)
-          
-          results.push({
-            id: listing.id,
-            status: 'regenerated',
-            oldUrl: listing.share_image_url
-          })
-        } catch (error) {
-          results.push({
-            id: listing.id,
-            status: 'error',
-            error: error.message
-          })
-        }
-      }
-      
-      return c.json({
-        success: true,
-        regenerated: results.filter(r => r.status === 'regenerated').length,
-        failed: results.filter(r => r.status === 'error').length,
-        results
-      })
-    } else {
-      // Queue share image generation for listings that don't have them (backfill)
-      const db = new Database(c.env.DB)
-      const listings = await db.db
-        .prepare(`
-          SELECT id
-          FROM listings
-          WHERE share_image_url IS NULL
-          AND cancelled_at IS NULL
-          ORDER BY created_at DESC
-          LIMIT ?
-        `)
-        .bind(limit)
-        .all()
-      
-      // Queue generation for each listing
-      console.log(`About to queue ${listings.results.length} listings for share image generation`)
-      for (const listing of listings.results) {
-        console.log(`Queueing listing ${listing.id}`)
-        shareImageQueue.queueShareImageGeneration(listing.id)
-      }
-      console.log(`Finished queueing all ${listings.results.length} listings`)
-      
-      return c.json({
-        success: true,
-        queued: listings.results.length,
-        message: `Queued ${listings.results.length} listings for share image generation (backfill)`
-      })
+    // Queue generation for each listing
+    console.log(`About to queue ${listings.results.length} listings for share image generation`)
+    for (const listing of listings.results) {
+      console.log(`Queueing listing ${listing.id}`)
+      await shareImageQueue.queueShareImageGeneration(listing.id)
     }
+    
+    console.log(`Finished queueing all ${listings.results.length} listings`)
+    
+    return c.json({
+      success: true,
+      queued: listings.results.length,
+      message: `Queued ${listings.results.length} listings for share image generation (backfill)`
+    })
   } catch (error) {
     console.error('Error generating share images:', error)
     return c.json({ error: 'Failed to generate share images', details: error.message }, 500)
@@ -534,13 +480,14 @@ admin.get('/share-image-stats', async (c) => {
 
 // Test queue endpoint
 admin.post('/test-queue', async (c) => {
-  try {
-    const shareImageQueue = new ShareImageQueue(c.env)
-    
+  try {    
     console.log('Testing queue with a single message')
-    
-    // Send a test message
-    await shareImageQueue.queueShareImageGeneration(1) // Use a fake listing ID
+
+    await c.env.SHARE_IMAGE_QUEUE.send({
+      type: 'generate_share_image',
+      listingId: 720,
+      timestamp: Date.now()
+    })
     
     return c.json({
       success: true,

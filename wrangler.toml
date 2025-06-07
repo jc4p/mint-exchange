@@ -14,14 +14,6 @@ d1_databases = [
   { binding = "DB", database_name = "nft-exchange", database_id = "b8152478-4cad-4769-ba8e-afd055db175f"}
 ]
 
-# Browser Binding
-browser = { binding = "BROWSER" }
-
-# KV Binding
-kv_namespaces = [
-  { binding = "MINT_EXCHANGE_BROWSER_KV", id = "6627c2c4064f48f79acf6f1bac1309b2", preview_id = "30bf4c8a78284d64a5d1028511602fa0" }
-]
-
 build = { command = "" }
 
 # R2 Storage Binding (for image uploads)
@@ -36,13 +28,6 @@ preview_bucket_name = "nft-exchange-images"
 [[queues.producers]]
 binding = "SHARE_IMAGE_QUEUE"
 queue = "share-image-queue"
-
-[[queues.consumers]]
-queue = "share-image-queue"
-max_batch_size = 1
-max_batch_timeout = 1
-max_retries = 3
-dead_letter_queue = "share-image-dlq"
 
 # Environment Variables
 [vars]
