@@ -33,4 +33,4 @@ USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 # Scheduled Workers (Cron Triggers)
 # Run the event indexer every 5 minutes
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/2 * * * *"]

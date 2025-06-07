@@ -326,6 +326,104 @@ listings.delete('/:id', authMiddleware(), async (c) => {
   }
 })
 
+// Record cancel (protected route)
+listings.post('/:id/cancel', authMiddleware(), async (c) => {
+  try {
+    const db = new Database(c.env.DB)
+    const user = c.get('user')
+    const listingId = c.req.param('id')
+    const body = await c.req.json()
+    
+    // txHash is required
+    if (!body.txHash) {
+      return c.json({ error: 'Transaction hash is required' }, 400)
+    }
+    
+    // Get listing to verify it exists and ownership
+    const listing = await db.getListing(listingId)
+    if (!listing) {
+      return c.json({ error: 'Listing not found' }, 404)
+    }
+    
+    // Check if user owns the listing (by FID)
+    if (listing.seller_fid !== user.fid) {
+      return c.json({ error: 'Unauthorized - You can only cancel your own listings' }, 403)
+    }
+    
+    // Import necessary utilities
+    const { createRpcClient, waitForAndGetTransactionReceipt } = await import('../utils/rpc-client.js')
+    const { parseAbi, decodeEventLog } = await import('viem')
+    const client = createRpcClient(c.env)
+    
+    // Wait for transaction receipt
+    console.log('Waiting for cancel transaction:', body.txHash)
+    const receipt = await waitForAndGetTransactionReceipt(client, body.txHash)
+    
+    if (receipt.status !== 'success') {
+      return c.json({ error: 'Transaction failed' }, 400)
+    }
+    
+    // Define the ListingCancelled event ABI
+    const NFT_EXCHANGE_EVENTS = parseAbi([
+      'event ListingCancelled(uint256 indexed listingId, address indexed seller)'
+    ])
+    
+    // Find and validate the ListingCancelled event
+    let cancelEvent = null
+    for (const log of receipt.logs) {
+      try {
+        const decoded = decodeEventLog({
+          abi: NFT_EXCHANGE_EVENTS,
+          data: log.data,
+          topics: log.topics,
+          strict: false
+        })
+        
+        if (decoded.eventName === 'ListingCancelled') {
+          // Verify this is for the correct listing
+          if (decoded.args.listingId.toString() === listing.blockchain_listing_id) {
+            cancelEvent = decoded.args
+            break
+          }
+        }
+      } catch (e) {
+        // Skip non-matching events
+      }
+    }
+    
+    if (!cancelEvent) {
+      return c.json({ error: 'ListingCancelled event not found or listing ID mismatch' }, 400)
+    }
+    
+    // Extract seller address from event
+    const sellerAddress = cancelEvent.seller
+    
+    // Verify the authenticated user is the seller
+    if (user.wallet_address && sellerAddress.toLowerCase() !== user.wallet_address.toLowerCase()) {
+      return c.json({ error: 'Transaction seller does not match authenticated user' }, 403)
+    }
+    
+    // Process the cancellation immediately
+    console.log('Processing cancellation for listing:', listing.blockchain_listing_id)
+    
+    // Cancel the listing in database
+    await db.cancelListing(
+      listing.blockchain_listing_id, 
+      sellerAddress, 
+      body.txHash
+    )
+    
+    return c.json({ 
+      success: true,
+      message: 'Cancellation recorded successfully'
+    })
+    
+  } catch (error) {
+    console.error('Error recording cancellation:', error)
+    return c.json({ error: 'Failed to record cancellation' }, 500)
+  }
+})
+
 // Record purchase (protected route)
 listings.post('/:id/purchase', authMiddleware(), async (c) => {
   try {

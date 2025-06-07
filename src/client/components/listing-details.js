@@ -204,18 +204,25 @@ export class ListingDetails extends BaseElement {
       const listing = await response.json()
       
       // Cancel the listing on the smart contract
-      const cancelTxHash = await transactionManager.cancelListing(listing.blockchain_listing_id || listing.id)
+      const cancelTxHash = await transactionManager.cancelListing(listing.blockchainListingId)
 
-      // Update the database via API
-      const cancelResponse = await fetch(`/api/listings/${listingData.id}?txHash=${cancelTxHash}`, {
-        method: 'DELETE',
+      // Notify backend immediately about the cancellation
+      if (actionBtn) {
+        actionBtn.textContent = 'Recording cancellation...'
+      }
+      
+      const cancelResponse = await fetch(`/api/listings/${listingData.id}/cancel`, {
+        method: 'POST',
         headers: {
-          'Authorization': `Bearer ${window.authToken}`
-        }
+          'Authorization': `Bearer ${window.authToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ txHash: cancelTxHash })
       })
 
       if (!cancelResponse.ok) {
-        throw new Error('Failed to update listing status')
+        console.error('Failed to record cancellation:', await cancelResponse.text())
+        // Continue anyway - the indexer will catch it eventually
       }
 
       // Success - refresh the page
