@@ -22,6 +22,8 @@ kv_namespaces = [
   { binding = "MINT_EXCHANGE_BROWSER_KV", id = "6627c2c4064f48f79acf6f1bac1309b2", preview_id = "30bf4c8a78284d64a5d1028511602fa0" }
 ]
 
+build = { command = "" }
+
 # R2 Storage Binding (for image uploads)
 # https://developers.cloudflare.com/r2/
 [[r2_buckets]]

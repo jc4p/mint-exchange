@@ -16,7 +16,7 @@ export class NeynarService {
   async fetchUserByFid(fid) {
     try {
       const url = `${this.baseUrl}/farcaster/user/bulk?fids=${fid}`
-      console.log('Neynar API request:', url)
+      // console.log('Neynar API request:', url)
       
       const response = await fetch(url, {
         headers: {
@@ -33,12 +33,12 @@ export class NeynarService {
       }
 
       const data = await response.json()
-      console.log('Neynar API raw response:', JSON.stringify(data, null, 2))
+      // console.log('Neynar API raw response:', JSON.stringify(data, null, 2))
       
       // The bulk endpoint returns an array of users
       if (data.users && data.users.length > 0) {
         const user = data.users[0]
-        console.log('First user object:', JSON.stringify(user, null, 2))
+        // console.log('First user object:', JSON.stringify(user, null, 2))
         
         // Extract the primary ETH address if available
         const primaryAddress = user.verified_addresses?.eth_addresses?.[0] || null
