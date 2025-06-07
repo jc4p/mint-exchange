@@ -97,6 +97,26 @@ export class NFTDetails extends BaseElement {
       
       console.log('Transaction submitted:', txHash)
       
+      // Notify backend immediately about the purchase
+      try {
+        const purchaseResponse = await fetch(`/api/listings/${nft.id}/purchase`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${window.authToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ txHash })
+        })
+
+        if (!purchaseResponse.ok) {
+          console.error('Failed to record purchase:', await purchaseResponse.text())
+          // Continue anyway - the indexer will catch it eventually
+        }
+      } catch (error) {
+        console.error('Error notifying backend:', error)
+        // Continue anyway
+      }
+      
       // Update UI
       await showAlert(`Purchase successful! Transaction: ${txHash}`, 'Purchase Complete')
       this.closeModal()

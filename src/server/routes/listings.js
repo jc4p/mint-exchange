@@ -326,4 +326,116 @@ listings.delete('/:id', authMiddleware(), async (c) => {
   }
 })
 
+// Record purchase (protected route)
+listings.post('/:id/purchase', authMiddleware(), async (c) => {
+  try {
+    const db = new Database(c.env.DB)
+    const user = c.get('user')
+    const listingId = c.req.param('id')
+    const body = await c.req.json()
+    
+    // txHash is required
+    if (!body.txHash) {
+      return c.json({ error: 'Transaction hash is required' }, 400)
+    }
+    
+    // Get listing to verify it exists
+    const listing = await db.getListing(listingId)
+    if (!listing) {
+      return c.json({ error: 'Listing not found' }, 404)
+    }
+    
+    // Import necessary utilities
+    const { createRpcClient, waitForAndGetTransactionReceipt } = await import('../utils/rpc-client.js')
+    const { parseAbi, decodeEventLog } = await import('viem')
+    const client = createRpcClient(c.env)
+    
+    // Wait for transaction receipt
+    console.log('Waiting for purchase transaction:', body.txHash)
+    const receipt = await waitForAndGetTransactionReceipt(client, body.txHash)
+    
+    if (receipt.status !== 'success') {
+      return c.json({ error: 'Transaction failed' }, 400)
+    }
+    
+    // Define the ListingSold event ABI
+    const NFT_EXCHANGE_EVENTS = parseAbi([
+      'event ListingSold(uint256 indexed listingId, address indexed buyer, uint256 price)'
+    ])
+    
+    // Find and validate the ListingSold event
+    let purchaseEvent = null
+    for (const log of receipt.logs) {
+      try {
+        const decoded = decodeEventLog({
+          abi: NFT_EXCHANGE_EVENTS,
+          data: log.data,
+          topics: log.topics,
+          strict: false
+        })
+        
+        if (decoded.eventName === 'ListingSold') {
+          // Verify this is for the correct listing
+          if (decoded.args.listingId.toString() === listing.blockchain_listing_id) {
+            purchaseEvent = decoded.args
+            break
+          }
+        }
+      } catch (e) {
+        // Skip non-matching events
+      }
+    }
+    
+    if (!purchaseEvent) {
+      return c.json({ error: 'ListingSold event not found or listing ID mismatch' }, 400)
+    }
+    
+    // Extract buyer address from event
+    const buyerAddress = purchaseEvent.buyer
+    
+    // Verify the authenticated user is the buyer
+    if (user.wallet_address && buyerAddress.toLowerCase() !== user.wallet_address.toLowerCase()) {
+      return c.json({ error: 'Transaction buyer does not match authenticated user' }, 403)
+    }
+    
+    // Process the purchase immediately
+    console.log('Processing purchase for listing:', listing.blockchain_listing_id)
+    
+    // Resolve buyer FID if not already known
+    let buyerFid = user.fid
+    
+    // Mark listing as sold in database
+    await db.markListingSold(
+      listing.blockchain_listing_id, 
+      buyerAddress, 
+      buyerFid, 
+      body.txHash
+    )
+    
+    // Record activity
+    await db.recordActivity({
+      type: 'nft_bought',
+      actor_fid: buyerFid,
+      actor_address: buyerAddress,
+      nft_contract: listing.nft_contract,
+      token_id: listing.token_id,
+      price: listing.price,
+      metadata: JSON.stringify({ 
+        listing_id: listing.blockchain_listing_id,
+        seller_fid: listing.seller_fid 
+      }),
+      tx_hash: body.txHash
+    })
+    
+    return c.json({ 
+      success: true,
+      message: 'Purchase recorded successfully'
+    })
+    
+  } catch (error) {
+    console.error('Error recording purchase:', error)
+    return c.json({ error: 'Failed to record purchase' }, 500)
+  }
+})
+
 export default listings

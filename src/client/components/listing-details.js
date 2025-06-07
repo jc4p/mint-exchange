@@ -145,6 +145,25 @@ export class ListingDetails extends BaseElement {
       
       const purchaseTxHash = await transactionManager.buyListing(listing.blockchainListingId)
 
+      // Notify backend immediately about the purchase
+      if (actionBtn) {
+        actionBtn.textContent = 'Recording purchase...'
+      }
+      
+      const purchaseResponse = await fetch(`/api/listings/${listingData.id}/purchase`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${window.authToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ txHash: purchaseTxHash })
+      })
+
+      if (!purchaseResponse.ok) {
+        console.error('Failed to record purchase:', await purchaseResponse.text())
+        // Continue anyway - the indexer will catch it eventually
+      }
+
       // Success - refresh the page to show updated status
       window.location.reload()
       
