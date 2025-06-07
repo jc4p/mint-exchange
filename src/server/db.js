@@ -131,6 +131,40 @@ export class Database {
       tx_hash
     } = listingData
     
+    // Check if listing already exists with this blockchain_listing_id
+    if (blockchain_listing_id) {
+      const existingListing = await this.db
+        .prepare(`
+          SELECT id FROM listings 
+          WHERE blockchain_listing_id = ?
+        `)
+        .bind(blockchain_listing_id)
+        .first()
+      
+      if (existingListing) {
+        console.log(`Listing with blockchain_listing_id ${blockchain_listing_id} already exists`)
+        return { meta: { last_row_id: existingListing.id } }
+      }
+    }
+    
+    // Also check if there's an active listing for this NFT
+    const activeListing = await this.db
+      .prepare(`
+        SELECT id FROM listings 
+        WHERE nft_contract = ? 
+          AND token_id = ?
+          AND sold_at IS NULL
+          AND cancelled_at IS NULL
+          AND expiry > datetime('now')
+      `)
+      .bind(nft_contract.toLowerCase(), token_id)
+      .first()
+    
+    if (activeListing) {
+      console.log(`Active listing already exists for ${nft_contract} #${token_id}`)
+      return { meta: { last_row_id: activeListing.id } }
+    }
+    
     const result = await this.db
       .prepare(`
         INSERT INTO listings (
@@ -259,6 +293,22 @@ export class Database {
   // Activity operations
   async recordActivity(activityData) {
     const { type, actor_fid, actor_address, nft_contract, token_id, price, metadata, tx_hash } = activityData
+    
+    // Check if activity with this tx_hash already exists to prevent duplicates
+    if (tx_hash) {
+      const existingActivity = await this.db
+        .prepare(`
+          SELECT id FROM activity 
+          WHERE tx_hash = ? AND type = ?
+        `)
+        .bind(tx_hash, type)
+        .first()
+      
+      if (existingActivity) {
+        console.log(`Activity of type ${type} with tx_hash ${tx_hash} already exists`)
+        return { meta: { last_row_id: existingActivity.id } }
+      }
+    }
     
     return await this.db
       .prepare(`

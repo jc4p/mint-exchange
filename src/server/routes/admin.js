@@ -183,6 +183,182 @@ admin.post('/update-missing-metadata', async (c) => {
   }
 })
 
+// Sync listings with blockchain data
+admin.post('/sync-listings', async (c) => {
+  try {
+    const body = await c.req.json()
+    const { limit = 50, dryRun = false } = body
+    
+    const db = new Database(c.env.DB)
+    const { createRpcClient, waitForAndGetTransaction } = await import('../utils/rpc-client.js')
+    const { decodeEventLog, parseAbi } = await import('viem')
+    const client = createRpcClient(c.env)
+    
+    // ABI for decoding ListingCreated events
+    const NFT_EXCHANGE_EVENTS = parseAbi([
+      'event ListingCreated(uint256 indexed listingId, address indexed seller, address indexed nftContract, uint256 tokenId, uint256 price, string metadataURI)'
+    ])
+    
+    // Get ALL listings that have tx_hash (including those with blockchain_listing_id)
+    const listings = await db.db
+      .prepare(`
+        SELECT id, tx_hash, blockchain_listing_id, nft_contract, token_id
+        FROM listings
+        WHERE tx_hash IS NOT NULL
+        ORDER BY created_at DESC
+        LIMIT ?
+      `)
+      .bind(limit)
+      .all()
+    
+    const results = {
+      total: listings.results.length,
+      processed: 0,
+      updated: 0,
+      failed: 0,
+      conflicts_resolved: 0,
+      details: []
+    }
+    
+    // First pass: collect all mappings
+    const mappings = new Map() // blockchain_listing_id -> listing record
+    const updates = [] // Array of { id, blockchain_listing_id } to apply
+    
+    // Process each listing to find its correct blockchain_listing_id
+    for (const listing of listings.results) {
+      const detail = {
+        id: listing.id,
+        tx_hash: listing.tx_hash,
+        current_blockchain_listing_id: listing.blockchain_listing_id,
+        status: 'processing',
+        blockchain_listing_id: null
+      }
+      
+      try {
+        // Fetch transaction and its receipt
+        const [tx, receipt] = await Promise.all([
+          waitForAndGetTransaction(client, listing.tx_hash),
+          client.getTransactionReceipt({ hash: listing.tx_hash })
+        ])
+        
+        // Find ListingCreated event in the logs
+        let listingId = null
+        for (const log of receipt.logs) {
+          try {
+            const decoded = decodeEventLog({
+              abi: NFT_EXCHANGE_EVENTS,
+              data: log.data,
+              topics: log.topics,
+              strict: false
+            })
+            
+            if (decoded.eventName === 'ListingCreated') {
+              // Verify this is for the correct NFT
+              if (decoded.args.nftContract.toLowerCase() === listing.nft_contract.toLowerCase() &&
+                  decoded.args.tokenId.toString() === listing.token_id) {
+                listingId = decoded.args.listingId.toString()
+                break
+              }
+            }
+          } catch (e) {
+            // Skip non-matching events
+          }
+        }
+        
+        if (listingId) {
+          detail.blockchain_listing_id = listingId
+          
+          // Check if this would be a change
+          if (listing.blockchain_listing_id !== listingId) {
+            updates.push({ id: listing.id, blockchain_listing_id: listingId })
+            detail.status = 'pending_update'
+          } else {
+            detail.status = 'already_correct'
+          }
+          
+          // Track which listing should have this blockchain_listing_id
+          if (mappings.has(listingId)) {
+            detail.conflict_with = mappings.get(listingId).id
+          }
+          mappings.set(listingId, listing)
+        } else {
+          detail.status = 'no_listing_id_found'
+          detail.error = 'No ListingCreated event found in transaction'
+          results.failed++
+        }
+        
+      } catch (error) {
+        detail.status = 'error'
+        detail.error = error.message
+        results.failed++
+      }
+      
+      results.processed++
+      results.details.push(detail)
+      
+      // Add small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    
+    // Second pass: apply updates if not dry run
+    if (!dryRun && updates.length > 0) {
+      // First, clear all blockchain_listing_ids that will be reassigned
+      const idsToUpdate = updates.map(u => u.blockchain_listing_id)
+      if (idsToUpdate.length > 0) {
+        await db.db
+          .prepare(`
+            UPDATE listings 
+            SET blockchain_listing_id = NULL
+            WHERE blockchain_listing_id IN (${idsToUpdate.map(() => '?').join(',')})
+          `)
+          .bind(...idsToUpdate)
+          .run()
+      }
+      
+      // Then apply all updates
+      for (const update of updates) {
+        try {
+          await db.db
+            .prepare(`
+              UPDATE listings 
+              SET blockchain_listing_id = ?
+              WHERE id = ?
+            `)
+            .bind(update.blockchain_listing_id, update.id)
+            .run()
+          
+          const detail = results.details.find(d => d.id === update.id)
+          if (detail) {
+            detail.status = 'updated'
+            results.updated++
+          }
+        } catch (error) {
+          const detail = results.details.find(d => d.id === update.id)
+          if (detail) {
+            detail.status = 'update_failed'
+            detail.error = error.message
+          }
+        }
+      }
+    } else if (dryRun) {
+      // In dry run, mark what would be updated
+      for (const update of updates) {
+        const detail = results.details.find(d => d.id === update.id)
+        if (detail) {
+          detail.status = 'would_update'
+          results.updated++
+        }
+      }
+    }
+    
+    return c.json(results)
+    
+  } catch (error) {
+    console.error('Error syncing listings:', error)
+    return c.json({ error: 'Failed to sync listings', details: error.message }, 500)
+  }
+})
+
 // Get admin stats
 admin.get('/stats', async (c) => {
   try {

@@ -105,41 +105,6 @@ export class TransactionManager {
     throw new Error(`Transaction ${txHash} not mined after ${maxWaitTime}ms`)
   }
 
-  /**
-   * Buy an NFT listing
-   */
-  async buyListing(listingId, price) {
-    const userAddress = await this.getWalletAddress()
-    const priceInUSDC = toUSDCAmount(price)
-
-    // Check USDC balance
-    const balance = await checkUSDCBalance(userAddress)
-    if (balance < priceInUSDC) {
-      throw new Error(`Insufficient USDC balance. You have ${Number(balance) / 1e6} USDC, need ${price} USDC`)
-    }
-
-    // Check USDC allowance
-    const allowance = await checkUSDCAllowance(userAddress, ADDRESSES.NFT_EXCHANGE)
-    
-    // If allowance is insufficient, approve USDC
-    if (allowance < priceInUSDC) {
-      console.log('Approving USDC spending...')
-      const approveData = encodeERC20.approve(ADDRESSES.NFT_EXCHANGE, priceInUSDC)
-      const approveTx = await this.sendTransaction(userAddress, ADDRESSES.USDC, approveData)
-      console.log('USDC approval tx:', approveTx)
-      
-      // Wait for approval to be mined
-      await this.waitForTransaction(approveTx)
-    }
-
-    // Buy the listing
-    console.log('Buying listing...')
-    const buyData = encodeNFTExchange.buyListing(listingId)
-    const buyTx = await this.sendTransaction(userAddress, ADDRESSES.NFT_EXCHANGE, buyData)
-    console.log('Buy listing tx:', buyTx)
-
-    return buyTx
-  }
 
   /**
    * Create a new listing
@@ -241,6 +206,51 @@ export class TransactionManager {
       }
       throw error
     }
+  }
+
+  /**
+   * Approve USDC spending
+   */
+  async approveUSDC(amount) {
+    const userAddress = await this.getWalletAddress()
+    const amountInUSDC = toUSDCAmount(amount)
+    
+    console.log('Approving USDC:', amount, 'USDC')
+    
+    // Check current allowance
+    const allowance = await checkUSDCAllowance(userAddress, ADDRESSES.NFT_EXCHANGE)
+    
+    if (allowance >= amountInUSDC) {
+      console.log('USDC already approved')
+      return null // No transaction needed
+    }
+    
+    // Approve USDC
+    const approveData = encodeERC20.approve(ADDRESSES.NFT_EXCHANGE, amountInUSDC)
+    const approveTx = await this.sendTransaction(userAddress, ADDRESSES.USDC, approveData)
+    console.log('USDC approval tx:', approveTx)
+    
+    // Wait for approval to be mined
+    await this.waitForTransaction(approveTx)
+    
+    return approveTx
+  }
+
+  /**
+   * Buy a listing
+   */
+  async buyListing(listingId) {
+    const userAddress = await this.getWalletAddress()
+    
+    console.log('Buying listing:', listingId)
+    
+    // Note: The calling code should have already approved USDC
+    // This just sends the buy transaction
+    const buyData = encodeNFTExchange.buyListing(listingId)
+    const buyTx = await this.sendTransaction(userAddress, ADDRESSES.NFT_EXCHANGE, buyData)
+    console.log('Buy listing tx:', buyTx)
+    
+    return buyTx
   }
 
   /**

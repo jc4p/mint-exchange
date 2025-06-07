@@ -14,7 +14,7 @@ export async function homePage(c) {
     featuredCollection = await db.getFeaturedCollection()
     
     // Get active listings
-    const result = await db.getActiveListings({ page: 1, limit: 8 })
+    const result = await db.getActiveListings({ page: 1, limit: 24 })
     
     listings = result.listings.map(listing => ({
       id: listing.id,

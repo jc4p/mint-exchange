@@ -1,7 +1,6 @@
 import { BaseElement } from './base-element.js'
 import { EVENTS } from '../utils/events.js'
 import { transactionManager } from '../utils/transactions.js'
-import { encodeNFTExchange } from '../utils/contract.js'
 import { showAlert, showConfirm } from './modal.js'
 
 export class ListingDetails extends BaseElement {
@@ -129,36 +128,22 @@ export class ListingDetails extends BaseElement {
       }
       const listing = await response.json()
 
+      // Check network first
+      await transactionManager.checkNetwork()
+
       // First approve USDC
       if (actionBtn) {
         actionBtn.textContent = 'Approving USDC...'
       }
       
-      const approvalData = {
-        contract: 'usdc',
-        method: 'approve',
-        args: [
-          import.meta.env.VITE_CONTRACT_ADDRESS || '0x06fB7424Ba65D587405b9C754Bc40dA9398B72F0',
-          listing.price * 1e6 // Convert to USDC decimals
-        ]
-      }
-
-      const approvalTxHash = await transactionManager.sendTransaction(approvalData)
-      await transactionManager.waitForTransaction(approvalTxHash)
+      await transactionManager.approveUSDC(listing.price)
 
       // Then purchase NFT
       if (actionBtn) {
         actionBtn.textContent = 'Purchasing NFT...'
       }
       
-      const purchaseData = encodeNFTExchange.buyListing(listing.id)
-      const purchaseTxHash = await transactionManager.sendTransaction({
-        contract: 'nftExchange',
-        method: 'buyListing',
-        data: purchaseData
-      })
-
-      await transactionManager.waitForTransaction(purchaseTxHash)
+      const purchaseTxHash = await transactionManager.buyListing(listing.blockchain_listing_id || listing.id)
 
       // Success - refresh the page to show updated status
       window.location.reload()
@@ -189,29 +174,28 @@ export class ListingDetails extends BaseElement {
     }
     
     try {
+      // Check network first
+      await transactionManager.checkNetwork()
+      
+      // Get full listing details to get blockchain listing ID
+      const response = await fetch(`/api/listings/${listingData.id}`)
+      if (!response.ok) {
+        throw new Error('Failed to fetch listing details')
+      }
+      const listing = await response.json()
+      
       // Cancel the listing on the smart contract
-      const cancelData = encodeNFTExchange.cancelListing(listingData.id)
-      const cancelTxHash = await transactionManager.sendTransaction({
-        contract: 'nftExchange',
-        method: 'cancelListing',
-        data: cancelData
-      })
-
-      await transactionManager.waitForTransaction(cancelTxHash)
+      const cancelTxHash = await transactionManager.cancelListing(listing.blockchain_listing_id || listing.id)
 
       // Update the database via API
-      const response = await fetch(`/api/listings/${listingData.id}/cancel`, {
-        method: 'POST',
+      const cancelResponse = await fetch(`/api/listings/${listingData.id}?txHash=${cancelTxHash}`, {
+        method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${window.authToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          txHash: cancelTxHash
-        })
+          'Authorization': `Bearer ${window.authToken}`
+        }
       })
 
-      if (!response.ok) {
+      if (!cancelResponse.ok) {
         throw new Error('Failed to update listing status')
       }
 
