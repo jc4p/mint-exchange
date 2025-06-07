@@ -1,19 +1,6 @@
-import { D1Database } from '@cloudflare/workers-types';
-
-interface Subscription {
-  notification_token: string;
-  notification_url: string;
-}
-
-interface NotificationPayload {
-  notifications: Array<{
-    notificationId: string;
-    title: string;
-    body: string;
-    targetUrl: string;
-    token: string;
-  }>;
-}
+// Removed: import { D1Database } from '@cloudflare/workers-types';
+// Removed: interface Subscription
+// Removed: interface NotificationPayload
 
 /**
  * Sends a Frame notification to a user via their Farcaster client.
@@ -21,29 +8,30 @@ interface NotificationPayload {
  * @param db - The D1 Database instance.
  * @param fid - The Farcaster User ID of the recipient.
  * @param title - The title of the notification.
- * @param body - The body text of the notification.
+ * @param bodyText - The body text of the notification.
  * @param targetUrl - The URL the user will be directed to when interacting with the notification.
  * @param notificationId - A stable and unique ID for this notification type (e.g., "new-comment-on-post-123").
- * @returns Promise<void>
+ * @returns Promise<void> (Note: JSDoc can keep this, but it's not enforced by JS)
  */
 export async function sendFrameNotification(
-  db: D1Database,
-  fid: number,
-  title: string,
-  bodyText: string, // Renamed from 'body' to avoid conflict with Request.body
-  targetUrl: string,
-  notificationId: string
-): Promise<void> {
+  db, // Removed D1Database type
+  fid, // Removed number type
+  title, // Removed string type
+  bodyText,
+  targetUrl, // Removed string type
+  notificationId // Removed string type
+  // Removed Promise<void> return type annotation
+) {
   // 1. Database Lookup
-  let subscription: Subscription | null = null;
+  let subscription = null; // Removed Subscription | null type
   try {
     const stmt = db.prepare(
       'SELECT notification_token, notification_url FROM farcaster_notification_subscriptions WHERE fid = ? AND is_active = TRUE'
     );
-    subscription = await stmt.bind(fid).first<Subscription>();
+    // Removed <Subscription> type assertion for first()
+    subscription = await stmt.bind(fid).first();
   } catch (error) {
     console.error(`Error fetching subscription for FID ${fid}:`, error);
-    // Depending on desired behavior, could throw an error here
     return;
   }
 
@@ -58,12 +46,12 @@ export async function sendFrameNotification(
   }
 
   // 2. Construct Notification Payload
-  const payload: NotificationPayload = {
+  const payload = { // Removed NotificationPayload type
     notifications: [
       {
         notificationId,
         title,
-        body: bodyText, // Use the renamed parameter
+        body: bodyText,
         targetUrl,
         token: subscription.notification_token,
       },
@@ -84,7 +72,6 @@ export async function sendFrameNotification(
     // 4. Handle Response
     if (response.ok) {
       const responseBody = await response.json();
-      // Farcaster clients should respond with HTTP 200 OK and a JSON body like {"status": "success", "message": "Notifications sent"}
       console.log(`Notification sent successfully to FID ${fid}. Response:`, responseBody);
     } else {
       const errorBody = await response.text();

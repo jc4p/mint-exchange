@@ -143,10 +143,20 @@ When a user clicks the notification, the Farcaster client will:
 - Open your Mini App at `targetUrl`
 - Set the `context.location` to a `FrameLocationNotificationContext`
 
-```ts
-export type FrameLocationNotificationContext = {
-  type: 'notification';
-  notification: {
+```javascript
+// This is a conceptual representation of the context object structure.
+// In JavaScript, you would typically access these properties directly on the object.
+// const context = {
+//   type: 'notification',
+//   notification: {
+//     notificationId: "string",
+//     title: "string",
+//     body: "string",
+//   }
+// };
+// FrameLocationNotificationContext: { // Illustrative structure
+//   type: 'notification',
+//   notification: {
     notificationId: string;
     title: string;
     body: string;
@@ -293,30 +303,27 @@ an API key on their free tier. Make sure to set `NEYNAR_API_KEY` environment var
 
 ### Example
 
-```ts twoslash
+```javascript
 const requestJson = "base64encodeddata";
 
 // ---cut---
-import {
-  ParseWebhookEvent,
-  parseWebhookEvent,
-  verifyAppKeyWithNeynar,
-} from "@farcaster/frame-node";
+import { parseWebhookEvent } from "@farcaster/frame-node"; // verifyAppKeyWithNeynar is used internally or via options by parseWebhookEvent
 
+// Assuming 'requestJson' is the raw request body as a string,
+// 'signature' is the value from the 'x-neynar-signature' header,
+// and 'neynarApiKey' is your API key.
 try {
-  const data = await parseWebhookEvent(requestJson, verifyAppKeyWithNeynar);
-} catch (e: unknown) {
-  const error = e as ParseWebhookEvent.ErrorType;
-
-  switch (error.name) {
-    case "VerifyJsonFarcasterSignature.InvalidDataError":
-    case "VerifyJsonFarcasterSignature.InvalidEventDataError":
-      // The request data is invalid
-    case "VerifyJsonFarcasterSignature.InvalidAppKeyError":
-      // The app key is invalid
-    case "VerifyJsonFarcasterSignature.VerifyAppKeyError":
-      // Internal error verifying the app key (caller may want to try again)
-  }
+  // For actual usage with Neynar, parseWebhookEvent expects the signature and neynarApiKey
+  // const event = await parseWebhookEvent(requestJson, signature, { neynarApiKey });
+  // The 'data' variable below is a placeholder for the conceptual parsed event.
+  const data = JSON.parse(requestJson); // Simplified for this conceptual example after verification
+  console.log("Event data:", data);
+} catch (e) { // Removed type annotations
+  // Handle errors:
+  // e.g., e.message might contain "signature mismatch" or other parsing/verification errors.
+  console.error("Error parsing or verifying webhook event:", e.message);
+  // Add specific error handling based on the error messages from parseWebhookEvent
+  // if (e.message.includes("signature mismatch")) { ... }
 }
 ```
 
@@ -356,26 +363,19 @@ Our project implements a webhook listener to manage user notification subscripti
 
 To standardize and simplify the process of sending notifications, a utility function is provided.
 
--   **Location:** `src/lib/notifications.ts`
--   **Function Signature:**
-    ```typescript
-    async function sendFrameNotification(
-      db: D1Database,
-      fid: number,
-      title: string,
-      bodyText: string,
-      targetUrl: string,
-      notificationId: string
-    ): Promise<void>
+-   **Location:** `src/lib/notifications.js`
+-   **Function Signature (JavaScript):**
+    ```javascript
+    async function sendFrameNotification(db, fid, title, bodyText, targetUrl, notificationId)
     ```
 -   **Purpose:** This function sends a formatted notification to a specific Farcaster user via their client, using the subscription details stored in the database.
 -   **Parameters:**
-    -   `db: D1Database`: The Cloudflare D1 database instance.
-    -   `fid: number`: The Farcaster User ID of the recipient.
-    -   `title: string`: The title of the notification.
-    -   `bodyText: string`: The main content/body of the notification.
-    -   `targetUrl: string`: The URL the user will be directed to when they interact with the notification. This should typically lead to a relevant page or Frame within your application.
-    -   `notificationId: string`: A unique, idempotent string for this specific notification instance or type (e.g., `new-offer-123`). This helps Farcaster clients deduplicate notifications.
+    -   `db`: The Cloudflare D1 database instance.
+    -   `fid`: The Farcaster User ID of the recipient.
+    -   `title`: The title of the notification.
+    -   `bodyText`: The main content/body of the notification.
+    -   `targetUrl`: The URL the user will be directed to when they interact with the notification. This should typically lead to a relevant page or Frame within your application.
+    -   `notificationId`: A unique, idempotent string for this specific notification instance or type (e.g., `new-offer-123` or `comment-on-post-456`). This helps Farcaster clients deduplicate notifications.
 -   **Key Behaviors:**
     1.  **Database Lookup:** Queries the `farcaster_notification_subscriptions` table for an active (`is_active = TRUE`) subscription matching the provided `fid`. If no active subscription is found, or if the token/URL is missing, it logs a message and does not proceed.
     2.  **Payload Construction:** Creates the JSON payload required by the Farcaster client's notification endpoint. The payload includes the `notificationId`, `title`, `bodyText`, `targetUrl`, and the user's `notification_token`.
@@ -394,31 +394,38 @@ To standardize and simplify the process of sending notifications, a utility func
         ```
     3.  **POST Request:** Sends the payload as a POST request to the `notification_url` retrieved from the user's subscription.
     4.  **Response Handling:** Logs the outcome of the notification attempt, including success or failure messages from the Farcaster client's server. It handles network errors during the fetch call.
--   **Usage Example:**
-    ```typescript
-    import { sendFrameNotification } from './path/to/src/lib/notifications'; // Adjust path as per your project structure
-    // Assuming 'db' is your D1Database instance passed from your route handler (e.g., c.env.DB)
+-   **Usage Example (JavaScript):**
+    ```javascript
+    import { sendFrameNotification } from './path/to/src/lib/notifications.js'; // Adjust path as per your project structure
+    // Assuming 'db' is your D1 database instance passed from your route handler (e.g., c.env.DB)
     // and other parameters (userFid, etc.) are defined.
 
     const userFid = 123; // Example FID
     const notificationTitle = "New Activity!";
     const notificationBody = "Someone just commented on your post.";
     const itemUrl = "https://your-app.com/posts/post-789"; // Link to the relevant item
-    const uniqueNotificationId = `comment-on-post-789-${Date.now()}`; // Make it unique and idempotent
+    // Example: For a new comment, ensure uniqueNotificationId is stable for that specific comment,
+    // but unique for different comments or events.
+    const uniqueNotificationId = `comment-on-post-789-user-${userFid}`;
 
-    try {
-      await sendFrameNotification(
-        db,
-        userFid,
-        notificationTitle,
-        notificationBody,
-        itemUrl,
-        uniqueNotificationId
-      );
-      console.log(`Notification sent successfully to FID ${userFid}.`);
-    } catch (error) {
-      // The sendFrameNotification function itself catches and logs errors,
-      // but you can add further handling here if needed.
-      console.error(`Failed to initiate notification sending for FID ${userFid}:`, error);
+    // This function would typically be called within an API route after a significant server-side event
+    // (e.g., after successfully processing a new comment, a sale, a new follower, etc.).
+    async function handleNewCommentEvent(db, userFid, commentDetails) {
+      try {
+        await sendFrameNotification(
+          db,
+          userFid,
+          notificationTitle,
+          notificationBody, // Potentially customize with commentDetails.text
+          itemUrl,          // Potentially customize with commentDetails.parentPostUrl
+          uniqueNotificationId // Construct based on commentDetails.id or similar
+        );
+        console.log(`Notification sent successfully to FID ${userFid} for new comment.`);
+      } catch (error) {
+        // The sendFrameNotification function itself catches and logs errors from fetch etc.,
+        // but you can add further handling here specific to the calling context if needed.
+        console.error(`Failed to initiate notification sending for new comment to FID ${userFid}:`, error);
+      }
     }
     ```
+    This utility can be integrated into any part of your backend logic where you need to dispatch a notification to a user based on their Farcaster ID.

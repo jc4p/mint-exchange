@@ -1,18 +1,9 @@
 import { Hono } from 'hono';
-import {
-  parseWebhookEvent,
-  verifyAppKeyWithNeynar,
-  WebhookEvent,
-  NotificationDetails,
-} from '@farcaster/frame-node';
+import { parseWebhookEvent } from '@farcaster/frame-node'; // verifyAppKeyWithNeynar is not directly used, parseWebhookEvent handles it.
 
-// Define the environment type
-type Env = {
-  DB: D1Database;
-  NEYNAR_API_KEY: string;
-};
+// Type annotations removed for Env, WebhookEvent, NotificationDetails
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono(); // Removed <{ Bindings: Env }>
 
 app.post('/', async (c) => {
   const neynarApiKey = c.env.NEYNAR_API_KEY;
@@ -21,7 +12,7 @@ app.post('/', async (c) => {
     return c.json({ error: 'Internal Server Error: Missing Neynar API Key' }, 500);
   }
 
-  let rawBody: string;
+  let rawBody;
   try {
     rawBody = await c.req.text(); // Read raw body as text
   } catch (error) {
@@ -35,11 +26,11 @@ app.post('/', async (c) => {
     return c.json({ error: 'Unauthorized: Missing signature' }, 401);
   }
 
-  let event: WebhookEvent;
+  let event;
   try {
     // parseWebhookEvent will verify the signature against the rawBody using the neynarApiKey
     event = await parseWebhookEvent(rawBody, signature, { neynarApiKey });
-  } catch (error: any) {
+  } catch (error) { // Removed : any type annotation
     // Check if the error is due to signature mismatch for a more specific error message
     if (error.message && error.message.includes('signature mismatch')) {
       console.error('Webhook signature verification failed:', error.message);
@@ -49,13 +40,14 @@ app.post('/', async (c) => {
     return c.json({ error: 'Bad Request: Invalid event payload or signature' }, 400);
   }
 
-  // Ensure event.message exists and contains signerFid and notificationDetails
+  // Ensure event.message exists and contains signerFid
+  // Removed type assertion for notificationDetails
   if (!event.message || typeof event.message.signerFid === 'undefined') {
     console.error('Could not extract fid from webhook event message');
     return c.json({ error: 'Bad Request: Missing fid in event payload' }, 400);
   }
   const fid = event.message.signerFid;
-  const notificationDetails = event.message.notificationDetails as NotificationDetails | undefined;
+  const notificationDetails = event.message.notificationDetails; // Removed "as NotificationDetails | undefined"
 
   try {
     if (event.type === 'frame_added' || event.type === 'notifications_enabled') {
