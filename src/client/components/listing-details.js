@@ -45,6 +45,12 @@ export class ListingDetails extends BaseElement {
   }
 
   attachEventListeners() {
+    // Handle share button
+    const shareBtn = document.querySelector('#share-listing-btn')
+    if (shareBtn) {
+      this.on(shareBtn, 'click', () => this.handleShare(shareBtn))
+    }
+
     // Handle action button clicks
     const actionBtn = this.querySelector('#action-btn')
     if (actionBtn) {
@@ -99,6 +105,32 @@ export class ListingDetails extends BaseElement {
       //   ownerText.textContent = 'This is your listing'
       //   actionsDiv.appendChild(ownerText)
       // }
+    }
+  }
+
+  async handleShare(shareBtn) {
+    try {
+      const listingId = shareBtn.getAttribute('data-listing-id')
+      const listingName = shareBtn.getAttribute('data-listing-name')
+      
+      // Create the share text and URL
+      const shareText = `Check out this auction on Mint Exchange: ${listingName}`
+      const shareUrl = `${window.location.origin}/listing/${listingId}`
+      
+      // Create Warpcast compose URL
+      const composeUrl = `https://warpcast.com/~/compose?text=${encodeURIComponent(shareText)}&embeds[]=${encodeURIComponent(shareUrl)}`
+      
+      // Get frame provider to use openUrl
+      const frameProvider = document.querySelector('frame-provider')
+      if (frameProvider && frameProvider.constructor.openUrl) {
+        await frameProvider.constructor.openUrl(composeUrl)
+      } else {
+        // Fallback to regular window.open if not in frame
+        window.open(composeUrl, '_blank')
+      }
+    } catch (error) {
+      console.error('Error sharing:', error)
+      await showAlert('Unable to share. Please try again.', 'Share Failed')
     }
   }
 

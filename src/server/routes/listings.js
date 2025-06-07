@@ -31,6 +31,7 @@ listings.get('/me', authMiddleware(), async (c) => {
       name: listing.name,
       image: listing.image_url,
       price: listing.price,
+      shareImageUrl: listing.share_image_url,
       seller: {
         address: listing.seller_address,
         username: listing.username || user.username,
@@ -156,6 +157,7 @@ listings.get('/:id', async (c) => {
       description: listing.description,
       image: listing.image_url,
       price: listing.price,
+      shareImageUrl: listing.share_image_url,
       seller: {
         address: listing.seller_address,
         username: listing.username || `user_${listing.seller_fid || 'unknown'}`,

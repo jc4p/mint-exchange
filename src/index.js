@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { createApp } from './server/app.js'
 import { homePage, profilePage, activityPage, searchPage, listingDetailsPage, collectionPage } from './server/pages.js'
+import { ShareImageQueue } from './server/services/share-image-queue.js'
 
 // Create main application
 const app = new Hono()
@@ -50,11 +51,35 @@ app.onError((err, c) => {
 })
 
 // Export for Cloudflare Workers
-export default {
+const worker = {
   fetch: app.fetch,
   // Scheduled worker for event indexing
   async scheduled(event, env, ctx) {
     const { default: scheduledHandler } = await import('./server/indexer.js')
     return scheduledHandler.scheduled(event, env, ctx)
+  },
+  // Queue consumer for share image generation
+  async queue(batch, env, ctx) {
+    console.log(`Queue consumer called with ${batch.messages.length} messages`)
+    
+    try {
+      for (const message of batch.messages) {
+        console.log(`Processing message:`, message.body)
+        try {
+          await ShareImageQueue.processQueueMessage(message, env)
+          console.log(`Successfully processed message for listing ${message.body.listingId}`)
+          message.ack()
+        } catch (error) {
+          console.error('Failed to process queue message:', error)
+          console.error('Message body:', message.body)
+          message.retry()
+        }
+      }
+      console.log(`Finished processing batch of ${batch.messages.length} messages`)
+    } catch (error) {
+      console.error('Error processing queue batch:', error)
+    }
   }
 }
+
+export default worker

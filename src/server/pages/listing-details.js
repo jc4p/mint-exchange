@@ -112,13 +112,40 @@ export async function listingDetailsPage(c) {
     price: listing.price
   }
   
+  // Prepare frame metadata for this listing
+  const frameMetadata = listing.share_image_url ? {
+    version: "next",
+    imageUrl: listing.share_image_url,
+    button: {
+      title: `View Listing`,
+      action: {
+        type: "launch_frame",
+        name: "Mint Exchange",
+        url: `https://mint-exchange.xyz/listing/${listing.id}`,
+        splashImageUrl: "https://cover-art.kasra.codes/mint_exchange_square.png",
+        splashBackgroundColor: "#6DD8FD"
+      }
+    }
+  } : undefined
+  
   return c.html(
     Layout({
+      frameMetadata,
       children: html`
         <frame-provider>
           <main class="main-content">
             <div class="listing-header-section">
-              <a href="/" class="back-link">← Back</a>
+              <div class="listing-header-nav">
+                <a href="/" class="back-link">← Back</a>
+                <button class="share-button" id="share-listing-btn" data-listing-id="${listing.id}" data-listing-name="${listing.name.replace(/"/g, '&quot;')}">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                    <polyline points="16 6 12 2 8 6"></polyline>
+                    <line x1="12" y1="2" x2="12" y2="15"></line>
+                  </svg>
+                  Share
+                </button>
+              </div>
               <h1 class="listing-page-title">Listing Details</h1>
             </div>
             <listing-details>

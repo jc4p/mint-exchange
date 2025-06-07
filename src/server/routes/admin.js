@@ -3,6 +3,7 @@ import { EventIndexer } from '../indexer.js'
 import { adminAuth } from '../middleware/auth.js'
 import { Database } from '../db.js'
 import { fetchNFTMetadata } from '../utils/metadata.js'
+import { ShareImageQueue } from '../services/share-image-queue.js'
 
 const admin = new Hono()
 
@@ -398,6 +399,156 @@ admin.get('/stats', async (c) => {
   } catch (error) {
     console.error('Error getting admin stats:', error)
     return c.json({ error: 'Failed to get stats' }, 500)
+  }
+})
+
+// Generate share images for listings
+admin.post('/generate-share-images', async (c) => {
+  try {
+    let body = {}
+    try {
+      body = await c.req.json()
+    } catch (e) {
+      // Default to empty object if no body provided
+      body = {}
+    }
+    const { limit = 10, regenerate = false } = body
+    
+    const shareImageQueue = new ShareImageQueue(c.env)
+    
+    if (regenerate) {
+      // Regenerate share images for listings that already have them
+      const db = new Database(c.env.DB)
+      const listings = await db.db
+        .prepare(`
+          SELECT id, share_image_url
+          FROM listings
+          WHERE share_image_url IS NOT NULL
+          AND cancelled_at IS NULL
+          ORDER BY created_at DESC
+          LIMIT ?
+        `)
+        .bind(limit)
+        .all()
+      
+      const results = []
+      
+      // Clear existing share images and regenerate
+      for (const listing of listings.results) {
+        try {
+          // Clear from KV cache
+          const cacheKey = `share-image:${listing.id}`
+          await c.env.MINT_EXCHANGE_BROWSER_KV.delete(cacheKey)
+          
+          // Clear from database to force regeneration
+          await db.db
+            .prepare('UPDATE listings SET share_image_url = NULL WHERE id = ?')
+            .bind(listing.id)
+            .run()
+          
+          // Regenerate the image
+          await shareImageQueue.generateShareImage(listing.id)
+          
+          results.push({
+            id: listing.id,
+            status: 'regenerated',
+            oldUrl: listing.share_image_url
+          })
+        } catch (error) {
+          results.push({
+            id: listing.id,
+            status: 'error',
+            error: error.message
+          })
+        }
+      }
+      
+      return c.json({
+        success: true,
+        regenerated: results.filter(r => r.status === 'regenerated').length,
+        failed: results.filter(r => r.status === 'error').length,
+        results
+      })
+    } else {
+      // Queue share image generation for listings that don't have them (backfill)
+      const db = new Database(c.env.DB)
+      const listings = await db.db
+        .prepare(`
+          SELECT id
+          FROM listings
+          WHERE share_image_url IS NULL
+          AND cancelled_at IS NULL
+          ORDER BY created_at DESC
+          LIMIT ?
+        `)
+        .bind(limit)
+        .all()
+      
+      // Queue generation for each listing
+      console.log(`About to queue ${listings.results.length} listings for share image generation`)
+      for (const listing of listings.results) {
+        console.log(`Queueing listing ${listing.id}`)
+        shareImageQueue.queueShareImageGeneration(listing.id)
+      }
+      console.log(`Finished queueing all ${listings.results.length} listings`)
+      
+      return c.json({
+        success: true,
+        queued: listings.results.length,
+        message: `Queued ${listings.results.length} listings for share image generation (backfill)`
+      })
+    }
+  } catch (error) {
+    console.error('Error generating share images:', error)
+    return c.json({ error: 'Failed to generate share images', details: error.message }, 500)
+  }
+})
+
+// Get share image generation stats
+admin.get('/share-image-stats', async (c) => {
+  try {
+    const db = new Database(c.env.DB)
+    
+    const stats = await db.db
+      .prepare(`
+        SELECT 
+          COUNT(*) as total_listings,
+          COUNT(CASE WHEN share_image_url IS NOT NULL THEN 1 END) as with_share_images,
+          COUNT(CASE WHEN share_image_url IS NULL AND cancelled_at IS NULL THEN 1 END) as pending_generation,
+          COUNT(CASE WHEN share_image_url IS NULL AND cancelled_at IS NOT NULL THEN 1 END) as cancelled_without_image
+        FROM listings
+      `)
+      .first()
+    
+    return c.json({
+      ...stats,
+      percentage_with_images: stats.total_listings > 0 
+        ? Math.round((stats.with_share_images / stats.total_listings) * 100) 
+        : 0
+    })
+  } catch (error) {
+    console.error('Error getting share image stats:', error)
+    return c.json({ error: 'Failed to get share image stats' }, 500)
+  }
+})
+
+// Test queue endpoint
+admin.post('/test-queue', async (c) => {
+  try {
+    const shareImageQueue = new ShareImageQueue(c.env)
+    
+    console.log('Testing queue with a single message')
+    
+    // Send a test message
+    await shareImageQueue.queueShareImageGeneration(1) // Use a fake listing ID
+    
+    return c.json({
+      success: true,
+      message: 'Test message sent to queue'
+    })
+  } catch (error) {
+    console.error('Error testing queue:', error)
+    return c.json({ error: 'Failed to test queue', details: error.message }, 500)
   }
 })
 

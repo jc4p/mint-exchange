@@ -2,6 +2,7 @@ import { parseAbi, decodeEventLog } from 'viem'
 import { createRpcClient } from './utils/rpc-client.js'
 import { NeynarService } from './neynar.js'
 import { fetchNFTMetadata } from './utils/metadata.js'
+import { ShareImageQueue } from './services/share-image-queue.js'
 
 // Contract configuration
 const CONTRACT_ADDRESS = '0x06fB7424Ba65D587405b9C754Bc40dA9398B72F0'
@@ -24,6 +25,7 @@ export class BlockchainService {
     this.env = env
     this.client = createRpcClient(env)
     this.neynar = env.NEYNAR_API_KEY ? new NeynarService(env.NEYNAR_API_KEY) : null
+    this.shareImageQueue = new ShareImageQueue(env)
   }
 
   /**
@@ -122,7 +124,7 @@ export class BlockchainService {
     )
 
     // Create listing in database
-    await db.createListing({
+    const result = await db.createListing({
       blockchain_listing_id: listingId.toString(),
       seller_fid: sellerFid,
       seller_address: seller,
@@ -136,6 +138,11 @@ export class BlockchainService {
       description: metadata.description || '',
       tx_hash: event.transactionHash
     })
+    
+    // Queue share image generation (non-blocking)
+    if (result.meta && result.meta.last_row_id) {
+      this.shareImageQueue.queueShareImageGeneration(result.meta.last_row_id)
+    }
   }
 
   /**

@@ -41,6 +41,7 @@ export class FrameProvider extends BaseElement {
 
       if (isFrameContext) {
         await frame.sdk.actions.ready()
+        await frame.sdk.back.enableWebNavigation();
         
         // Get wallet address from ETH provider
         let walletAddress = null
@@ -93,7 +94,7 @@ export class FrameProvider extends BaseElement {
 
     try {
       // Use quickAuth as per the docs
-      const { token } = await frame.sdk.experimental.quickAuth()
+      const { token } = await frame.sdk.actions.quickAuth()
       
       if (token) {
         // Store the token for authenticated requests

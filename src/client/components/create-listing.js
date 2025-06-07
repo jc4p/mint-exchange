@@ -301,6 +301,13 @@ export class CreateListing extends BaseElement {
           font-weight: 600;
         }
         
+        .fee-notice {
+          color: #49739c;
+          font-size: 13px;
+          margin-top: 8px;
+          margin-bottom: 0;
+        }
+        
         .expiry-options {
           display: grid;
           grid-template-columns: repeat(4, 1fr);
@@ -381,7 +388,7 @@ export class CreateListing extends BaseElement {
         
         @media (max-width: 480px) {
           .modal {
-            margin: 20px;
+            margin: 0px;
           }
           
           .expiry-options {
@@ -430,6 +437,7 @@ export class CreateListing extends BaseElement {
                   />
                   <span class="price-suffix">USDC</span>
                 </div>
+                <p class="fee-notice">A 1% platform fee will be charged on purchase</p>
                 ${error ? `<p class="error-message">${error}</p>` : ''}
               </div>
               

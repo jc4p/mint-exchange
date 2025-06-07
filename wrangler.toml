@@ -3,27 +3,44 @@
 
 name = "nft-exchange"
 main = "src/index.js"
-compatibility_date = "2025-06-04"
+compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 
-[build]
-command = ""
-
-[assets]
-directory = "./dist/client"
+assets = { directory = "./dist/client" }
 
 # D1 Database Binding
 # https://developers.cloudflare.com/d1/
-[[d1_databases]]
-binding = "DB"
-database_name = "nft-exchange"
-database_id = "b8152478-4cad-4769-ba8e-afd055db175f"
+d1_databases = [
+  { binding = "DB", database_name = "nft-exchange", database_id = "b8152478-4cad-4769-ba8e-afd055db175f"}
+]
+
+# Browser Binding
+browser = { binding = "BROWSER" }
+
+# KV Binding
+kv_namespaces = [
+  { binding = "MINT_EXCHANGE_BROWSER_KV", id = "6627c2c4064f48f79acf6f1bac1309b2", preview_id = "30bf4c8a78284d64a5d1028511602fa0" }
+]
 
 # R2 Storage Binding (for image uploads)
 # https://developers.cloudflare.com/r2/
 [[r2_buckets]]
 binding = "R2"
 bucket_name = "nft-exchange-images"
+preview_bucket_name = "nft-exchange-images"
+
+# Queue for share image generation
+# https://developers.cloudflare.com/queues/
+[[queues.producers]]
+binding = "SHARE_IMAGE_QUEUE"
+queue = "share-image-queue"
+
+[[queues.consumers]]
+queue = "share-image-queue"
+max_batch_size = 1
+max_batch_timeout = 1
+max_retries = 3
+dead_letter_queue = "share-image-dlq"
 
 # Environment Variables
 [vars]
@@ -31,6 +48,6 @@ CONTRACT_ADDRESS = "0x06fB7424Ba65D587405b9C754Bc40dA9398B72F0"
 USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
 
 # Scheduled Workers (Cron Triggers)
-# Run the event indexer every 5 minutes
+# Run the event indexer every 2 minutes
 [triggers]
 crons = ["*/2 * * * *"]

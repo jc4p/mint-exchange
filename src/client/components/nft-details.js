@@ -359,7 +359,7 @@ export class NFTDetails extends BaseElement {
         
         @media (max-width: 480px) {
           .modal {
-            margin: 20px;
+            margin: 0px;
           }
           
           .details-grid {

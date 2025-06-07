@@ -12,6 +12,7 @@
 		"test": "vitest"
 	},
 	"devDependencies": {
+		"@cloudflare/puppeteer": "^1.0.2",
 		"@cloudflare/vitest-pool-workers": "^0.8.19",
 		"@types/node": "^22.15.29",
 		"@vitejs/plugin-legacy": "^6.1.1",
@@ -23,7 +24,7 @@
 		"wrangler": "^4.19.1"
 	},
 	"dependencies": {
-		"@farcaster/frame-sdk": "^0.0.57",
+		"@farcaster/frame-sdk": "^0.0.60",
 		"@farcaster/quick-auth": "^0.0.6",
 		"hono": "^4.7.11",
 		"mitt": "^3.0.1",

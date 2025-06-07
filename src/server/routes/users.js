@@ -14,9 +14,7 @@ users.get('/me/nfts', authMiddleware(), async (c) => {
     if (!walletAddress) {
       return c.json({ error: 'No wallet address provided. Please ensure your Farcaster client has wallet access.' }, 400)
     }
-    
-    console.log('Fetching NFTs for wallet:', walletAddress)
-    
+        
     // Use the utility function to fetch NFTs
     const result = await fetchWalletNFTs(walletAddress, c.env.ALCHEMY_API_KEY)
     return c.json(result)
@@ -49,9 +47,7 @@ users.get('/:fid/nfts', async (c) => {
 users.get('/wallet/:address/nfts', async (c) => {
   try {
     const address = c.req.param('address')
-    
-    console.log('Fetching NFTs for wallet:', address)
-    
+
     // Use the utility function to fetch NFTs
     const result = await fetchWalletNFTs(address, c.env.ALCHEMY_API_KEY)
     return c.json(result)
