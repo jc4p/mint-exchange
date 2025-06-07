@@ -23,6 +23,7 @@
 		"wrangler": "^4.19.1"
 	},
 	"dependencies": {
+		"@farcaster/frame-node": "^0.0.38",
 		"@farcaster/frame-sdk": "^0.0.57",
 		"@farcaster/quick-auth": "^0.0.6",
 		"hono": "^4.7.11",

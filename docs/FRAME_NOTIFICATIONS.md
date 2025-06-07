@@ -143,10 +143,20 @@ When a user clicks the notification, the Farcaster client will:
 - Open your Mini App at `targetUrl`
 - Set the `context.location` to a `FrameLocationNotificationContext`
 
-```ts
-export type FrameLocationNotificationContext = {
-  type: 'notification';
-  notification: {
+```javascript
+// This is a conceptual representation of the context object structure.
+// In JavaScript, you would typically access these properties directly on the object.
+// const context = {
+//   type: 'notification',
+//   notification: {
+//     notificationId: "string",
+//     title: "string",
+//     body: "string",
+//   }
+// };
+// FrameLocationNotificationContext: { // Illustrative structure
+//   type: 'notification',
+//   notification: {
     notificationId: string;
     title: string;
     body: string;
@@ -293,30 +303,27 @@ an API key on their free tier. Make sure to set `NEYNAR_API_KEY` environment var
 
 ### Example
 
-```ts twoslash
+```javascript
 const requestJson = "base64encodeddata";
 
 // ---cut---
-import {
-  ParseWebhookEvent,
-  parseWebhookEvent,
-  verifyAppKeyWithNeynar,
-} from "@farcaster/frame-node";
+import { parseWebhookEvent } from "@farcaster/frame-node"; // verifyAppKeyWithNeynar is used internally or via options by parseWebhookEvent
 
+// Assuming 'requestJson' is the raw request body as a string,
+// 'signature' is the value from the 'x-neynar-signature' header,
+// and 'neynarApiKey' is your API key.
 try {
-  const data = await parseWebhookEvent(requestJson, verifyAppKeyWithNeynar);
-} catch (e: unknown) {
-  const error = e as ParseWebhookEvent.ErrorType;
-
-  switch (error.name) {
-    case "VerifyJsonFarcasterSignature.InvalidDataError":
-    case "VerifyJsonFarcasterSignature.InvalidEventDataError":
-      // The request data is invalid
-    case "VerifyJsonFarcasterSignature.InvalidAppKeyError":
-      // The app key is invalid
-    case "VerifyJsonFarcasterSignature.VerifyAppKeyError":
-      // Internal error verifying the app key (caller may want to try again)
-  }
+  // For actual usage with Neynar, parseWebhookEvent expects the signature and neynarApiKey
+  // const event = await parseWebhookEvent(requestJson, signature, { neynarApiKey });
+  // The 'data' variable below is a placeholder for the conceptual parsed event.
+  const data = JSON.parse(requestJson); // Simplified for this conceptual example after verification
+  console.log("Event data:", data);
+} catch (e) { // Removed type annotations
+  // Handle errors:
+  // e.g., e.message might contain "signature mismatch" or other parsing/verification errors.
+  console.error("Error parsing or verifying webhook event:", e.message);
+  // Add specific error handling based on the error messages from parseWebhookEvent
+  // if (e.message.includes("signature mismatch")) { ... }
 }
 ```
 
@@ -329,3 +336,96 @@ For a complete example, check out the [Mini App V2 Demo
 - [Saves notification tokens to Redis](https://github.com/farcasterxyz/frames-v2-demo/blob/main/src/lib/kv.ts)
 - [Sends notifications](https://github.com/farcasterxyz/frames-v2-demo/blob/main/src/lib/notifs.ts)
 
+## Project Implementation Details
+
+The following sections describe the specific implementation of the Farcaster notification system within this project.
+
+### Webhook Listener: `/api/farcaster/webhook`
+
+Our project implements a webhook listener to manage user notification subscriptions.
+
+-   **Endpoint:** `POST /api/farcaster/webhook`
+-   **Purpose:** This endpoint receives events from Farcaster clients (e.g., Warpcast) when users interact with the application's Frame, specifically regarding notification preferences.
+-   **Request Handling:**
+    -   The endpoint expects a JSON payload. The raw request body and a signature header (e.g., `x-neynar-signature`) are used for verification.
+    -   Signature verification is performed using the `parseWebhookEvent` function from the `@farcaster/frame-node` library. This function requires a `NEYNAR_API_KEY` (set as an environment variable) to validate the event against Neynar's services.
+-   **Events Handled & Database Operations:**
+    -   **`frame_added` / `notifications_enabled`**: When a user adds the Frame or enables notifications, the webhook extracts the `fid` (Farcaster User ID), `notificationDetails.token` (user-specific notification token), and `notificationDetails.url` (URL for sending notifications to the user). These details are then saved to the `farcaster_notification_subscriptions` table in our D1 database. If a subscription for the `fid` already exists, it's updated (UPSERT logic); `is_active` is set to `TRUE`, and `updated_at` is refreshed.
+    -   **`frame_removed` / `notifications_disabled`**: When a user removes the Frame or disables notifications, the webhook extracts the `fid`. The corresponding subscription in `farcaster_notification_subscriptions` is marked as inactive by setting `is_active = FALSE`, and `updated_at` is refreshed.
+-   **Responses:**
+    -   `200 OK`: Successfully processed the event.
+    -   `202 Accepted`: Event type received but not specifically handled by our current logic.
+    -   `400 Bad Request`: Invalid payload, missing required fields, or parsing error.
+    -   `401 Unauthorized`: Signature verification failed (e.g., invalid signature, missing signature header).
+    -   `500 Internal Server Error`: Server-side issues (e.g., database error, missing `NEYNAR_API_KEY`).
+
+### Utility Function: `sendFrameNotification`
+
+To standardize and simplify the process of sending notifications, a utility function is provided.
+
+-   **Location:** `src/lib/notifications.js`
+-   **Function Signature (JavaScript):**
+    ```javascript
+    async function sendFrameNotification(db, fid, title, bodyText, targetUrl, notificationId)
+    ```
+-   **Purpose:** This function sends a formatted notification to a specific Farcaster user via their client, using the subscription details stored in the database.
+-   **Parameters:**
+    -   `db`: The Cloudflare D1 database instance.
+    -   `fid`: The Farcaster User ID of the recipient.
+    -   `title`: The title of the notification.
+    -   `bodyText`: The main content/body of the notification.
+    -   `targetUrl`: The URL the user will be directed to when they interact with the notification. This should typically lead to a relevant page or Frame within your application.
+    -   `notificationId`: A unique, idempotent string for this specific notification instance or type (e.g., `new-offer-123` or `comment-on-post-456`). This helps Farcaster clients deduplicate notifications.
+-   **Key Behaviors:**
+    1.  **Database Lookup:** Queries the `farcaster_notification_subscriptions` table for an active (`is_active = TRUE`) subscription matching the provided `fid`. If no active subscription is found, or if the token/URL is missing, it logs a message and does not proceed.
+    2.  **Payload Construction:** Creates the JSON payload required by the Farcaster client's notification endpoint. The payload includes the `notificationId`, `title`, `bodyText`, `targetUrl`, and the user's `notification_token`.
+        ```json
+        {
+          "notifications": [
+            {
+              "notificationId": "your-stable-notification-id",
+              "title": "Notification Title",
+              "body": "Notification body text.",
+              "targetUrl": "https://your-frame-url.com/specific-page",
+              "token": "the-user-specific-notification-token"
+            }
+          ]
+        }
+        ```
+    3.  **POST Request:** Sends the payload as a POST request to the `notification_url` retrieved from the user's subscription.
+    4.  **Response Handling:** Logs the outcome of the notification attempt, including success or failure messages from the Farcaster client's server. It handles network errors during the fetch call.
+-   **Usage Example (JavaScript):**
+    ```javascript
+    import { sendFrameNotification } from './path/to/src/lib/notifications.js'; // Adjust path as per your project structure
+    // Assuming 'db' is your D1 database instance passed from your route handler (e.g., c.env.DB)
+    // and other parameters (userFid, etc.) are defined.
+
+    const userFid = 123; // Example FID
+    const notificationTitle = "New Activity!";
+    const notificationBody = "Someone just commented on your post.";
+    const itemUrl = "https://your-app.com/posts/post-789"; // Link to the relevant item
+    // Example: For a new comment, ensure uniqueNotificationId is stable for that specific comment,
+    // but unique for different comments or events.
+    const uniqueNotificationId = `comment-on-post-789-user-${userFid}`;
+
+    // This function would typically be called within an API route after a significant server-side event
+    // (e.g., after successfully processing a new comment, a sale, a new follower, etc.).
+    async function handleNewCommentEvent(db, userFid, commentDetails) {
+      try {
+        await sendFrameNotification(
+          db,
+          userFid,
+          notificationTitle,
+          notificationBody, // Potentially customize with commentDetails.text
+          itemUrl,          // Potentially customize with commentDetails.parentPostUrl
+          uniqueNotificationId // Construct based on commentDetails.id or similar
+        );
+        console.log(`Notification sent successfully to FID ${userFid} for new comment.`);
+      } catch (error) {
+        // The sendFrameNotification function itself catches and logs errors from fetch etc.,
+        // but you can add further handling here specific to the calling context if needed.
+        console.error(`Failed to initiate notification sending for new comment to FID ${userFid}:`, error);
+      }
+    }
+    ```
+    This utility can be integrated into any part of your backend logic where you need to dispatch a notification to a user based on their Farcaster ID.

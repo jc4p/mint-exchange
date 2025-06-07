@@ -29,8 +29,18 @@ bucket_name = "nft-exchange-images"
 [vars]
 CONTRACT_ADDRESS = "0x06fB7424Ba65D587405b9C754Bc40dA9398B72F0"
 USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+NEYNAR_API_KEY = "YOUR_NEYNAR_API_KEY_HERE" # IMPORTANT: Replace with your actual Neynar API key
 
 # Scheduled Workers (Cron Triggers)
 # Run the event indexer every 5 minutes
 [triggers]
 crons = ["*/5 * * * *"]
+
+# D1 Migrations
+# https://developers.cloudflare.com/d1/platform/migrations/#local-development
+[[migrations]]
+tag = "v1" # Should be unique for each entry
+new_classes = ["D1Database", "D1PreparedStatement", "D1Result"]
+# The directory of migrations to apply to the database for this version.
+# All .sql files within this directory will be applied in alphabetical order.
+migrations_dir = "migrations"
