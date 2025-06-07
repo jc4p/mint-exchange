@@ -68,6 +68,18 @@ The database includes the following tables:
 - **offers**: Offers made on NFTs
 - **activity**: All marketplace events (sales, listings, etc.)
 - **indexed_blocks**: For blockchain event tracking
+- **farcaster_notification_subscriptions**: Stores user preferences and details for Farcaster Frame notifications.
+
+### `farcaster_notification_subscriptions` Table Schema
+
+| Column             | Type    | Constraints                               | Description                                                                 |
+|--------------------|---------|-------------------------------------------|-----------------------------------------------------------------------------|
+| `fid`              | INTEGER | PRIMARY KEY                               | The Farcaster User ID.                                                      |
+| `notification_token` | TEXT    | NOT NULL                                  | The unique token provided by the Farcaster client for sending notifications. |
+| `notification_url` | TEXT    | NOT NULL                                  | The URL provided by the Farcaster client to POST notification requests to.  |
+| `is_active`        | BOOLEAN | DEFAULT TRUE                              | Indicates if the subscription is currently active.                          |
+| `created_at`       | DATETIME| DEFAULT CURRENT_TIMESTAMP                 | Timestamp of when the subscription was created.                             |
+| `updated_at`       | DATETIME| DEFAULT CURRENT_TIMESTAMP                 | Timestamp of the last update to the subscription.                           |
 
 ## Testing the Database
 

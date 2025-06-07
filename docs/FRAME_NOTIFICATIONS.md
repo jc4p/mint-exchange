@@ -329,3 +329,96 @@ For a complete example, check out the [Mini App V2 Demo
 - [Saves notification tokens to Redis](https://github.com/farcasterxyz/frames-v2-demo/blob/main/src/lib/kv.ts)
 - [Sends notifications](https://github.com/farcasterxyz/frames-v2-demo/blob/main/src/lib/notifs.ts)
 
+## Project Implementation Details
+
+The following sections describe the specific implementation of the Farcaster notification system within this project.
+
+### Webhook Listener: `/api/farcaster/webhook`
+
+Our project implements a webhook listener to manage user notification subscriptions.
+
+-   **Endpoint:** `POST /api/farcaster/webhook`
+-   **Purpose:** This endpoint receives events from Farcaster clients (e.g., Warpcast) when users interact with the application's Frame, specifically regarding notification preferences.
+-   **Request Handling:**
+    -   The endpoint expects a JSON payload. The raw request body and a signature header (e.g., `x-neynar-signature`) are used for verification.
+    -   Signature verification is performed using the `parseWebhookEvent` function from the `@farcaster/frame-node` library. This function requires a `NEYNAR_API_KEY` (set as an environment variable) to validate the event against Neynar's services.
+-   **Events Handled & Database Operations:**
+    -   **`frame_added` / `notifications_enabled`**: When a user adds the Frame or enables notifications, the webhook extracts the `fid` (Farcaster User ID), `notificationDetails.token` (user-specific notification token), and `notificationDetails.url` (URL for sending notifications to the user). These details are then saved to the `farcaster_notification_subscriptions` table in our D1 database. If a subscription for the `fid` already exists, it's updated (UPSERT logic); `is_active` is set to `TRUE`, and `updated_at` is refreshed.
+    -   **`frame_removed` / `notifications_disabled`**: When a user removes the Frame or disables notifications, the webhook extracts the `fid`. The corresponding subscription in `farcaster_notification_subscriptions` is marked as inactive by setting `is_active = FALSE`, and `updated_at` is refreshed.
+-   **Responses:**
+    -   `200 OK`: Successfully processed the event.
+    -   `202 Accepted`: Event type received but not specifically handled by our current logic.
+    -   `400 Bad Request`: Invalid payload, missing required fields, or parsing error.
+    -   `401 Unauthorized`: Signature verification failed (e.g., invalid signature, missing signature header).
+    -   `500 Internal Server Error`: Server-side issues (e.g., database error, missing `NEYNAR_API_KEY`).
+
+### Utility Function: `sendFrameNotification`
+
+To standardize and simplify the process of sending notifications, a utility function is provided.
+
+-   **Location:** `src/lib/notifications.ts`
+-   **Function Signature:**
+    ```typescript
+    async function sendFrameNotification(
+      db: D1Database,
+      fid: number,
+      title: string,
+      bodyText: string,
+      targetUrl: string,
+      notificationId: string
+    ): Promise<void>
+    ```
+-   **Purpose:** This function sends a formatted notification to a specific Farcaster user via their client, using the subscription details stored in the database.
+-   **Parameters:**
+    -   `db: D1Database`: The Cloudflare D1 database instance.
+    -   `fid: number`: The Farcaster User ID of the recipient.
+    -   `title: string`: The title of the notification.
+    -   `bodyText: string`: The main content/body of the notification.
+    -   `targetUrl: string`: The URL the user will be directed to when they interact with the notification. This should typically lead to a relevant page or Frame within your application.
+    -   `notificationId: string`: A unique, idempotent string for this specific notification instance or type (e.g., `new-offer-123`). This helps Farcaster clients deduplicate notifications.
+-   **Key Behaviors:**
+    1.  **Database Lookup:** Queries the `farcaster_notification_subscriptions` table for an active (`is_active = TRUE`) subscription matching the provided `fid`. If no active subscription is found, or if the token/URL is missing, it logs a message and does not proceed.
+    2.  **Payload Construction:** Creates the JSON payload required by the Farcaster client's notification endpoint. The payload includes the `notificationId`, `title`, `bodyText`, `targetUrl`, and the user's `notification_token`.
+        ```json
+        {
+          "notifications": [
+            {
+              "notificationId": "your-stable-notification-id",
+              "title": "Notification Title",
+              "body": "Notification body text.",
+              "targetUrl": "https://your-frame-url.com/specific-page",
+              "token": "the-user-specific-notification-token"
+            }
+          ]
+        }
+        ```
+    3.  **POST Request:** Sends the payload as a POST request to the `notification_url` retrieved from the user's subscription.
+    4.  **Response Handling:** Logs the outcome of the notification attempt, including success or failure messages from the Farcaster client's server. It handles network errors during the fetch call.
+-   **Usage Example:**
+    ```typescript
+    import { sendFrameNotification } from './path/to/src/lib/notifications'; // Adjust path as per your project structure
+    // Assuming 'db' is your D1Database instance passed from your route handler (e.g., c.env.DB)
+    // and other parameters (userFid, etc.) are defined.
+
+    const userFid = 123; // Example FID
+    const notificationTitle = "New Activity!";
+    const notificationBody = "Someone just commented on your post.";
+    const itemUrl = "https://your-app.com/posts/post-789"; // Link to the relevant item
+    const uniqueNotificationId = `comment-on-post-789-${Date.now()}`; // Make it unique and idempotent
+
+    try {
+      await sendFrameNotification(
+        db,
+        userFid,
+        notificationTitle,
+        notificationBody,
+        itemUrl,
+        uniqueNotificationId
+      );
+      console.log(`Notification sent successfully to FID ${userFid}.`);
+    } catch (error) {
+      // The sendFrameNotification function itself catches and logs errors,
+      // but you can add further handling here if needed.
+      console.error(`Failed to initiate notification sending for FID ${userFid}:`, error);
+    }
+    ```
