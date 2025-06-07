@@ -25,6 +25,7 @@ listings.get('/me', authMiddleware(), async (c) => {
     // Transform data to match frontend expectations
     const transformedListings = result.listings.map(listing => ({
       id: listing.id,
+      blockchainListingId: listing.blockchain_listing_id,
       tokenId: listing.token_id,
       contractAddress: listing.nft_contract,
       name: listing.name,
@@ -67,6 +68,7 @@ listings.get('/', async (c) => {
     // Transform data to match frontend expectations
     const transformedListings = result.listings.map(listing => ({
       id: listing.id,
+      blockchainListingId: listing.blockchain_listing_id,
       tokenId: listing.token_id,
       contractAddress: listing.nft_contract,
       name: listing.name,
@@ -147,6 +149,7 @@ listings.get('/:id', async (c) => {
     // Transform to match frontend format
     const transformed = {
       id: listing.id,
+      blockchainListingId: listing.blockchain_listing_id,
       tokenId: listing.token_id,
       contractAddress: listing.nft_contract,
       name: listing.name,
@@ -185,11 +188,51 @@ listings.post('/', authMiddleware(), async (c) => {
       return c.json({ error: 'Transaction hash is required' }, 400)
     }
     
-    // Get seller address from the transaction
-    const { createRpcClient, waitForAndGetTransaction } = await import('../utils/rpc-client.js')
+    // Get seller address from the transaction and blockchain listing ID from event logs
+    const { createRpcClient, waitForAndGetTransaction, waitForAndGetTransactionReceipt } = await import('../utils/rpc-client.js')
+    const { parseAbi, decodeEventLog } = await import('viem')
     const client = createRpcClient(c.env)
-    const tx = await waitForAndGetTransaction(client, body.txHash)
+    
+    // Get both transaction and receipt
+    const [tx, receipt] = await Promise.all([
+      waitForAndGetTransaction(client, body.txHash),
+      waitForAndGetTransactionReceipt(client, body.txHash)
+    ])
+    
     const sellerAddress = tx.from
+    
+    // Define the ListingCreated event ABI
+    const NFT_EXCHANGE_EVENTS = parseAbi([
+      'event ListingCreated(uint256 indexed listingId, address indexed seller, address indexed nftContract, uint256 tokenId, uint256 price, string metadataURI)'
+    ])
+    
+    // Extract blockchain listing ID from event logs
+    let blockchainListingId = null
+    for (const log of receipt.logs) {
+      try {
+        const decoded = decodeEventLog({
+          abi: NFT_EXCHANGE_EVENTS,
+          data: log.data,
+          topics: log.topics,
+          strict: false
+        })
+        
+        if (decoded.eventName === 'ListingCreated') {
+          // Verify this is for the correct NFT
+          if (decoded.args.nftContract.toLowerCase() === body.nftContract.toLowerCase() &&
+              decoded.args.tokenId.toString() === body.tokenId.toString()) {
+            blockchainListingId = decoded.args.listingId.toString()
+            break
+          }
+        }
+      } catch (e) {
+        // Skip non-matching events
+      }
+    }
+    
+    if (!blockchainListingId) {
+      return c.json({ error: 'Could not find ListingCreated event in transaction logs' }, 400)
+    }
     
     // Fetch metadata if not provided or incomplete
     let metadata = body.metadata || {}
@@ -213,9 +256,9 @@ listings.post('/', authMiddleware(), async (c) => {
       }
     }
     
-    // Create listing in database - let the DB handle the auto-increment ID
+    // Create listing in database using the blockchain listing ID from event logs
     const result = await db.createListing({
-      blockchain_listing_id: body.blockchainListingId || null,
+      blockchain_listing_id: blockchainListingId,
       seller_fid: user.fid,
       seller_address: sellerAddress,
       nft_contract: body.nftContract,

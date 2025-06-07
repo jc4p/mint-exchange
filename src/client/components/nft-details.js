@@ -84,12 +84,16 @@ export class NFTDetails extends BaseElement {
       // Check network first
       await transactionManager.checkNetwork()
 
-      // Use the listing ID directly
-      const listingId = nft.id
+      // Use the blockchain listing ID for the smart contract call
+      const listingId = nft.blockchainListingId
+      
+      if (!listingId) {
+        throw new Error('Blockchain listing ID not found. This listing may not be properly indexed.')
+      }
       
       // Buy the listing
       console.log('Buying listing:', listingId, 'for', nft.price, 'USDC')
-      const txHash = await transactionManager.buyListing(listingId, parseFloat(nft.price))
+      const txHash = await transactionManager.buyListing(listingId)
       
       console.log('Transaction submitted:', txHash)
       

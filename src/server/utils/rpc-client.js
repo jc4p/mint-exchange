@@ -47,6 +47,30 @@ export async function waitForAndGetTransaction(client, hash, maxAttempts = 10, d
 }
 
 /**
+ * Wait for a transaction receipt to be available and get it
+ * Retries up to maxAttempts times with a delay between attempts
+ */
+export async function waitForAndGetTransactionReceipt(client, hash, maxAttempts = 10, delayMs = 200) {
+  console.log(`Waiting for transaction receipt ${hash} to be available...`)
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const receipt = await client.getTransactionReceipt({ hash })
+      console.log(`Transaction receipt found on attempt ${attempt}`)
+      return receipt
+    } catch (error) {
+      if (attempt === maxAttempts) {
+        console.error(`Transaction receipt not found after ${maxAttempts} attempts`)
+        throw error
+      }
+      
+      console.log(`Transaction receipt not found on attempt ${attempt}, retrying in ${delayMs}ms...`)
+      await new Promise(resolve => setTimeout(resolve, delayMs))
+    }
+  }
+}
+
+/**
  * Proxy a JSON-RPC request through our configured RPC endpoint
  */
 export async function proxyRpcRequest(env, { method, params, id = 1, jsonrpc = '2.0' }) {
