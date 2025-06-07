@@ -143,7 +143,7 @@ export class ListingDetails extends BaseElement {
         actionBtn.textContent = 'Purchasing NFT...'
       }
       
-      const purchaseTxHash = await transactionManager.buyListing(listing.blockchain_listing_id || listing.id)
+      const purchaseTxHash = await transactionManager.buyListing(listing.blockchainListingId)
 
       // Success - refresh the page to show updated status
       window.location.reload()

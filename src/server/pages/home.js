@@ -100,7 +100,7 @@ export async function homePage(c) {
             <latest-section>
               ${raw(listings.filter(nft => 
                 !featuredCollection || nft.contractAddress !== featuredCollection.contract_address
-              ).slice(0, 6).map((nft, index) => `
+              ).slice(0, 300).map((nft, index) => `
                 <div class="latest-item" data-listing-id="${nft.id}">
                   <div class="latest-image" style="background-image: url('${nft.image}')"></div>
                   <div class="latest-info">
