@@ -3,6 +3,8 @@
  * Provides typed queries and helper functions for database operations
  */
 
+import { formatActivityTimestamps } from './utils/timestamp.js'
+
 export class Database {
   constructor(db) {
     this.db = db
@@ -393,7 +395,7 @@ export class Database {
       .bind(...params.slice(0, -2)) // Remove limit and offset
       .first()
     
-    return {
+    const activityData = {
       activities: results.results,
       pagination: {
         page,
@@ -402,6 +404,8 @@ export class Database {
         hasMore: offset + limit < total.count
       }
     }
+    
+    return formatActivityTimestamps(activityData)
   }
 
   // Stats and analytics

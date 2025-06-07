@@ -20,6 +20,10 @@ app.get('/.well-known/farcaster.json', async (c) => {
     "frame": {
       "version": "1",
       "name": "Mint Exchange",
+      "subtitle": "Farcaster Native NFT Marketplace",
+      "description": "Buy and sell NFTs all within Farcaster",
+      "primaryCategory": "shopping",
+      "tags": ["nft", "opensea"],
       "iconUrl": "https://cover-art.kasra.codes/mint_exchange_square.png",
       "homeUrl": "https://mint-exchange.xyz",
       "imageUrl": "https://cover-art.kasra.codes/mint_exchange_rectangle.png",

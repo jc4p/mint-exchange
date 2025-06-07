@@ -47,7 +47,8 @@ export class CreateListing extends BaseElement {
       isOpen: false,
       nft: null,
       price: '',
-      error: null
+      error: null,
+      loading: false
     })
   }
 
