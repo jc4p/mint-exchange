@@ -94,7 +94,8 @@ listings.get('/', async (c) => {
         return {
           ...baseListing,
           orderHash: listing.order_hash,
-          orderParameters: listing.order_parameters, // Consider if this should be parsed or returned as string
+          orderData: listing.order_parameters ? JSON.parse(listing.order_parameters) : null, // Parse and rename for frontend compatibility
+          orderParameters: listing.order_parameters, // Keep original for backward compatibility
           zoneAddress: listing.zone_address,
           conduitKey: listing.conduit_key,
           salt: listing.salt,
@@ -191,7 +192,8 @@ listings.get('/:id', async (c) => {
 
     if (listing.contract_type === 'seaport') {
       transformed.orderHash = listing.order_hash;
-      transformed.orderParameters = listing.order_parameters; // Consider if parsing is needed client-side
+      transformed.orderData = listing.order_parameters ? JSON.parse(listing.order_parameters) : null; // Parse and rename for frontend compatibility
+      transformed.orderParameters = listing.order_parameters; // Keep original for backward compatibility
       transformed.zoneAddress = listing.zone_address;
       transformed.conduitKey = listing.conduit_key;
       transformed.salt = listing.salt;

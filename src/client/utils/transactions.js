@@ -241,6 +241,11 @@ export class TransactionManager {
       )
       
       console.log('✅ Listing created:', result)
+      // For Seaport, return the full result including order data
+      if (useSeaport && result.order) {
+        return result
+      }
+      // For NFTExchange, just return the hash for backward compatibility
       return result.hash
     } catch (error) {
       console.error('❌ Create listing failed:', error)

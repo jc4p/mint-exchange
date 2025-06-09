@@ -72,7 +72,7 @@ export class CreateListing extends BaseElement {
       
       // Create listing on blockchain
       console.log('Creating listing on blockchain using Seaport...')
-      const txHash = await transactionManager.createListing(
+      const result = await transactionManager.createListing(
         nft.contract.address,
         nft.tokenId,
         parseFloat(price),
@@ -81,7 +81,12 @@ export class CreateListing extends BaseElement {
         true   // Always use Seaport for new listings
       )
       
+      // Extract txHash and order data
+      const txHash = typeof result === 'string' ? result : result.hash
+      const orderData = typeof result === 'object' ? result.order : null
+      
       console.log('Transaction submitted:', txHash)
+      console.log('Seaport order data:', orderData)
       
       // Calculate expiry date
       const expiryDate = new Date()
@@ -100,6 +105,7 @@ export class CreateListing extends BaseElement {
           price: price,
           expiry: expiryDate.toISOString(),
           contractType: 'seaport', // Always Seaport for new listings
+          orderParameters: orderData, // Include Seaport order data
           metadata: {
             name: nft.title,
             description: nft.description,
