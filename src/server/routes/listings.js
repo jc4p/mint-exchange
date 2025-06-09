@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { Database } from '../db.js'
 import { authMiddleware } from '../middleware/auth.js'
 import { fetchNFTMetadata } from '../utils/metadata.js'
+import { SEAPORT_ABI } from '../blockchain.js'
 
 const listings = new Hono()
 
@@ -482,29 +483,45 @@ listings.post('/:id/cancel', authMiddleware(), async (c) => {
     if (receipt.status !== 'success') return c.json({ error: 'Transaction failed' }, 400);
 
     if (listing.contract_type === 'nft_exchange') {
-      const NFT_EXCHANGE_EVENTS = parseAbi(['event ListingCancelled(uint256 indexed listingId, address indexed seller)']);
+      console.log('Processing NFTExchange cancellation, looking for ListingCancelled event');
+      console.log('Expected blockchain_listing_id:', listing.blockchain_listing_id);
+      console.log('NFTExchange contract address:', c.env.CONTRACT_ADDRESS);
+      console.log('Receipt logs count:', receipt.logs.length);
+      
+      const NFT_EXCHANGE_EVENTS = parseAbi(['event ListingCancelled(uint256 indexed listingId)']);
       let eventFound = false;
       for (const log of receipt.logs) {
-         if (log.address.toLowerCase() !== c.env.CONTRACT_ADDRESS?.toLowerCase()) continue;
+        console.log('Checking log from address:', log.address);
+        if (log.address.toLowerCase() !== c.env.CONTRACT_ADDRESS?.toLowerCase()) continue;
         try {
           const decoded = decodeEventLog({ abi: NFT_EXCHANGE_EVENTS, data: log.data, topics: log.topics, eventName: 'ListingCancelled', strict: false });
+          console.log('Decoded ListingCancelled event:', decoded.args);
           if (decoded && decoded.args && decoded.args.listingId.toString() === listing.blockchain_listing_id) {
-            if (decoded.args.seller.toLowerCase() !== listing.seller_address.toLowerCase()){
-               return c.json({ error: 'Event seller does not match listing seller.'}, 403);
-            }
-            await db.cancelListing(listing.blockchain_listing_id, decoded.args.seller, body.txHash);
+            await db.cancelListing(listing.blockchain_listing_id, listing.seller_address, body.txHash);
             eventFound = true;
             break;
           }
-        } catch (e) { /* Skip */ }
+        } catch (e) { 
+          console.log('Error decoding log:', e.message);
+        }
       }
-      if (!eventFound) return c.json({ error: 'NFTExchange ListingCancelled event not found or ID mismatch' }, 400);
+      if (!eventFound) {
+        console.log('ListingCancelled event not found for listing ID:', listing.blockchain_listing_id);
+        return c.json({ error: 'NFTExchange ListingCancelled event not found or ID mismatch' }, 400);
+      }
     } else if (listing.contract_type === 'seaport') {
+      console.log('Processing Seaport cancellation, looking for OrderCancelled event');
+      console.log('Expected orderHash:', listing.order_hash);
+      console.log('Seaport contract address:', c.env.SEAPORT_CONTRACT_ADDRESS);
+      console.log('Receipt logs count:', receipt.logs.length);
+      
       let eventFound = false;
       for (const log of receipt.logs) {
+        console.log('Checking log from address:', log.address);
         if (log.address.toLowerCase() !== c.env.SEAPORT_CONTRACT_ADDRESS?.toLowerCase()) continue;
         try {
           const decoded = decodeEventLog({ abi: SEAPORT_ABI, data: log.data, topics: log.topics, eventName: 'OrderCancelled', strict: false });
+          console.log('Decoded OrderCancelled event:', decoded.args);
           if (decoded && decoded.args && decoded.args.orderHash === listing.order_hash) {
              if (decoded.args.offerer.toLowerCase() !== listing.seller_address.toLowerCase()){
                return c.json({ error: 'Seaport order canceller does not match listing seller.'}, 403);
@@ -518,9 +535,14 @@ listings.post('/:id/cancel', authMiddleware(), async (c) => {
             eventFound = true;
             break;
           }
-        } catch (e) { /* Skip */ }
+        } catch (e) { 
+          console.log('Error decoding log:', e.message);
+        }
       }
-      if (!eventFound) return c.json({ error: 'Seaport OrderCancelled event not found for this listing orderHash' }, 400);
+      if (!eventFound) {
+        console.log('OrderCancelled event not found for orderHash:', listing.order_hash);
+        return c.json({ error: 'Seaport OrderCancelled event not found for this listing orderHash' }, 400);
+      }
     } else {
       return c.json({ error: 'Unknown listing contract type' }, 400);
     }
