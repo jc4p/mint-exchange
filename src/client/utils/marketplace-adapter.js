@@ -1,8 +1,4 @@
-import { Buffer } from 'buffer'
-import { Seaport } from '@opensea/seaport-js'
-import { createWalletClient, custom, parseUnits, formatUnits } from 'viem'
-import { base } from 'viem/chains'
-import { ethers } from 'ethers'
+import { parseUnits, formatUnits, encodePacked, keccak256 } from 'viem'
 import { 
   SEAPORT_ADDRESS, 
   USDC_ADDRESS, 
@@ -13,11 +9,6 @@ import {
   calculateFeeAmounts 
 } from './seaport-config.js'
 import { NFT_EXCHANGE_ADDRESS, NFT_EXCHANGE_ABI } from './contract.js'
-
-// Make Buffer available globally for Seaport SDK
-if (typeof window !== 'undefined' && !window.Buffer) {
-  window.Buffer = Buffer
-}
 
 // Base marketplace adapter class
 export class MarketplaceAdapter {
@@ -128,65 +119,11 @@ export class NFTExchangeAdapter extends MarketplaceAdapter {
   }
 }
 
-// Adapter for Seaport protocol
+// Adapter for Seaport protocol - simplified to work directly with Frame ethProvider
 export class SeaportAdapter extends MarketplaceAdapter {
   constructor(signer, account, publicClient) {
     super(signer, account)
     this.publicClient = publicClient
-    
-    // Create an ethers provider that wraps our RPC endpoint
-    // Use the full URL for ethers provider
-    const rpcUrl = typeof window !== 'undefined' 
-      ? `${window.location.origin}/api/rpc/proxy`
-      : 'http://localhost:8787/api/rpc/proxy'
-    const ethersProvider = new ethers.JsonRpcProvider(rpcUrl)
-    
-    // Create an ethers signer that wraps the Frame's ethProvider
-    const ethersSigner = new ethers.VoidSigner(account, ethersProvider)
-    
-    // Override the signer methods to use our viem wallet client
-    ethersSigner.signMessage = async (message) => {
-      return await signer.signMessage({ message, account })
-    }
-    
-    ethersSigner.signTypedData = async (domain, types, value) => {
-      return await signer.signTypedData({
-        domain,
-        types,
-        primaryType: Object.keys(types).find(t => t !== 'EIP712Domain'),
-        message: value,
-        account
-      })
-    }
-    
-    ethersSigner.sendTransaction = async (tx) => {
-      // Convert ethers transaction to viem format
-      const viemTx = {
-        to: tx.to,
-        data: tx.data,
-        value: tx.value ? BigInt(tx.value.toString()) : undefined,
-        from: account
-      }
-      
-      const hash = await signer.sendTransaction(viemTx)
-      
-      // Return ethers-compatible transaction response
-      return {
-        hash,
-        wait: async () => {
-          const receipt = await publicClient.waitForTransactionReceipt({ hash })
-          return {
-            status: receipt.status === 'success' ? 1 : 0,
-            transactionHash: receipt.transactionHash
-          }
-        }
-      }
-    }
-
-    // Initialize Seaport with the ethers signer
-    this.seaport = new Seaport(ethersSigner, {
-      overrides: { contractAddress: SEAPORT_ADDRESS }
-    })
   }
 
   async createListing(nft, price, duration) {
@@ -231,35 +168,181 @@ export class SeaportAdapter extends MarketplaceAdapter {
       // 2. Sign the order
       // 3. Return the order hash and signed order
       
-      // Get standardized order parameters
+      // Log individual values to find the null
+      console.log('Debugging order values:', {
+        'nft.contract': nft.contract,
+        'nft.tokenId': nft.tokenId,
+        'sellerAmount': sellerAmount,
+        'feeAmount': feeAmount,
+        'this.account': this.account,
+        'order.endTime': order.endTime
+      })
+      
+      // Get standardized order parameters with proper BigNumber formatting
       const orderParameters = {
         offerer: this.account,
-        zone: order.zone || ethers.ZeroAddress,
-        offer: order.offer,
-        consideration: order.consideration,
+        zone: order.zone || '0x0000000000000000000000000000000000000000',
+        offer: order.offer.map(item => {
+          const amount = item.amount ? BigInt(item.amount).toString() : "1";
+          const formatted = {
+            itemType: item.itemType,
+            token: item.token,
+            startAmount: amount,  // Seaport 1.6 uses startAmount
+            endAmount: amount,    // Same as startAmount for fixed-price listings
+            identifierOrCriteria: item.identifier ? BigInt(item.identifier).toString() : "0"  // Always include for all items in 1.6
+          };
+          return formatted;
+        }),
+        consideration: order.consideration.map(item => {
+          const amount = item.amount ? BigInt(item.amount).toString() : "0";
+          const formatted = {
+            itemType: item.itemType,
+            token: item.token,
+            startAmount: amount,  // Seaport 1.6 uses startAmount
+            endAmount: amount,    // Same as startAmount for fixed-price listings
+            identifierOrCriteria: "0",  // Required for all items in 1.6, "0" for ERC20
+            recipient: item.recipient
+          };
+          return formatted;
+        }),
         orderType: order.orderType,
-        startTime: Math.floor(Date.now() / 1000),
-        endTime: order.endTime,
-        zoneHash: order.zoneHash || ethers.ZeroHash,
-        salt: ethers.hexlify(ethers.randomBytes(32)),
-        conduitKey: order.conduitKey || ethers.ZeroHash,
+        startTime: Math.floor(Date.now() / 1000).toString(),
+        endTime: order.endTime.toString(),
+        zoneHash: order.zoneHash || '0x0000000000000000000000000000000000000000000000000000000000000000',
+        salt: `0x${[...crypto.getRandomValues(new Uint8Array(32))].map(b => b.toString(16).padStart(2, '0')).join('')}`,
+        conduitKey: order.conduitKey || '0x0000000000000000000000000000000000000000000000000000000000000000',
         counter: "0" // Will be fetched from chain
       }
       
       console.log('Order parameters before getting counter:', orderParameters)
       
       // Get the current counter from the contract
-      const counter = await this.seaport.getCounter(this.account)
-      orderParameters.counter = counter.toString()
+      const counterData = await this.publicClient.readContract({
+        address: SEAPORT_ADDRESS,
+        abi: [{
+          name: 'getCounter',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [{ name: 'offerer', type: 'address' }],
+          outputs: [{ name: 'counter', type: 'uint256' }]
+        }],
+        functionName: 'getCounter',
+        args: [this.account]
+      })
+      console.log('Counter from Seaport:', counterData, 'Type:', typeof counterData)
+      orderParameters.counter = counterData.toString()
       
       console.log('Final order parameters:', orderParameters)
       
-      // Get the order hash
-      const orderHash = this.seaport.getOrderHash(orderParameters)
+      // Calculate order hash using viem's keccak256 and proper EIP-712 encoding
+      console.log('Calculating order hash with EIP-712...')
+      
+      // Encode the order parameters for hashing according to Seaport 1.6
+      // The order hash is keccak256 of the encoded order parameters
+      const orderHash = await this.publicClient.readContract({
+        address: SEAPORT_ADDRESS,
+        abi: [{
+          name: 'getOrderHash',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [{
+            name: 'orderComponents',
+            type: 'tuple',
+            components: [
+              { name: 'offerer', type: 'address' },
+              { name: 'zone', type: 'address' },
+              { name: 'offer', type: 'tuple[]', components: [
+                { name: 'itemType', type: 'uint8' },
+                { name: 'token', type: 'address' },
+                { name: 'identifierOrCriteria', type: 'uint256' },
+                { name: 'startAmount', type: 'uint256' },
+                { name: 'endAmount', type: 'uint256' }
+              ]},
+              { name: 'consideration', type: 'tuple[]', components: [
+                { name: 'itemType', type: 'uint8' },
+                { name: 'token', type: 'address' },
+                { name: 'identifierOrCriteria', type: 'uint256' },
+                { name: 'startAmount', type: 'uint256' },
+                { name: 'endAmount', type: 'uint256' },
+                { name: 'recipient', type: 'address' }
+              ]},
+              { name: 'orderType', type: 'uint8' },
+              { name: 'startTime', type: 'uint256' },
+              { name: 'endTime', type: 'uint256' },
+              { name: 'zoneHash', type: 'bytes32' },
+              { name: 'salt', type: 'uint256' },
+              { name: 'conduitKey', type: 'bytes32' },
+              { name: 'counter', type: 'uint256' }
+            ]
+          }],
+          outputs: [{ name: 'orderHash', type: 'bytes32' }]
+        }],
+        functionName: 'getOrderHash',
+        args: [orderParameters]
+      })
+      
       console.log('Order hash:', orderHash)
       
-      // Sign the order using the signer
-      const signature = await this.seaport.signOrder(orderParameters, this.account)
+      // Sign the order off-chain using Frame's ethProvider
+      console.log('Signing order off-chain using Frame ethProvider...')
+      
+      // Import frameUtils to access the ethProvider
+      const { frameUtils } = await import('../components/frame-provider.js')
+      const ethProvider = frameUtils.sdk.wallet.ethProvider
+      
+      const domain = {
+        name: "Seaport",
+        version: "1.6",
+        chainId: 8453,
+        verifyingContract: SEAPORT_ADDRESS
+      }
+      
+      const types = {
+        OrderComponents: [
+          { name: "offerer", type: "address" },
+          { name: "zone", type: "address" },
+          { name: "offer", type: "OfferItem[]" },
+          { name: "consideration", type: "ConsiderationItem[]" },
+          { name: "orderType", type: "uint8" },
+          { name: "startTime", type: "uint256" },
+          { name: "endTime", type: "uint256" },
+          { name: "zoneHash", type: "bytes32" },
+          { name: "salt", type: "uint256" },
+          { name: "conduitKey", type: "bytes32" },
+          { name: "counter", type: "uint256" }
+        ],
+        OfferItem: [
+          { name: "itemType", type: "uint8" },
+          { name: "token", type: "address" },
+          { name: "identifierOrCriteria", type: "uint256" },
+          { name: "startAmount", type: "uint256" },
+          { name: "endAmount", type: "uint256" }
+        ],
+        ConsiderationItem: [
+          { name: "itemType", type: "uint8" },
+          { name: "token", type: "address" },
+          { name: "identifierOrCriteria", type: "uint256" },
+          { name: "startAmount", type: "uint256" },
+          { name: "endAmount", type: "uint256" },
+          { name: "recipient", type: "address" }
+        ]
+      }
+      
+      const typedData = {
+        domain,
+        types,
+        primaryType: 'OrderComponents',
+        message: orderParameters
+      }
+
+      console.log('Calling eth_signTypedData_v4 with params:', [this.account, JSON.stringify(typedData)])
+
+      // Use eth_signTypedData_v4 directly through the Frame's ethProvider
+      const signature = await ethProvider.request({
+        method: 'eth_signTypedData_v4',
+        params: [this.account, JSON.stringify(typedData)]
+      })
+      
       console.log('Order signature:', signature)
       
       // Return the signed order data
@@ -280,24 +363,125 @@ export class SeaportAdapter extends MarketplaceAdapter {
 
   async buyListing(listing) {
     try {
-      const { executeAllActions } = await this.seaport.fulfillOrder({
-        order: listing.orderData,
-        accountAddress: this.account
+      // For Seaport orders, we need to call fulfillOrder on the contract
+      const { request } = await this.publicClient.simulateContract({
+        address: SEAPORT_ADDRESS,
+        abi: [{
+          name: 'fulfillOrder',
+          type: 'function',
+          stateMutability: 'payable',
+          inputs: [
+            {
+              name: 'order',
+              type: 'tuple',
+              components: [
+                {
+                  name: 'parameters',
+                  type: 'tuple',
+                  components: [
+                    { name: 'offerer', type: 'address' },
+                    { name: 'zone', type: 'address' },
+                    { name: 'offer', type: 'tuple[]', components: [
+                      { name: 'itemType', type: 'uint8' },
+                      { name: 'token', type: 'address' },
+                      { name: 'identifierOrCriteria', type: 'uint256' },
+                      { name: 'startAmount', type: 'uint256' },
+                      { name: 'endAmount', type: 'uint256' }
+                    ]},
+                    { name: 'consideration', type: 'tuple[]', components: [
+                      { name: 'itemType', type: 'uint8' },
+                      { name: 'token', type: 'address' },
+                      { name: 'identifierOrCriteria', type: 'uint256' },
+                      { name: 'startAmount', type: 'uint256' },
+                      { name: 'endAmount', type: 'uint256' },
+                      { name: 'recipient', type: 'address' }
+                    ]},
+                    { name: 'orderType', type: 'uint8' },
+                    { name: 'startTime', type: 'uint256' },
+                    { name: 'endTime', type: 'uint256' },
+                    { name: 'zoneHash', type: 'bytes32' },
+                    { name: 'salt', type: 'uint256' },
+                    { name: 'conduitKey', type: 'bytes32' },
+                    { name: 'totalOriginalConsiderationItems', type: 'uint256' }
+                  ]
+                },
+                { name: 'signature', type: 'bytes' }
+              ]
+            },
+            { name: 'fulfillerConduitKey', type: 'bytes32' }
+          ],
+          outputs: [{ name: 'fulfilled', type: 'bool' }]
+        }],
+        functionName: 'fulfillOrder',
+        args: [
+          {
+            parameters: {
+              ...listing.orderData.parameters,
+              totalOriginalConsiderationItems: listing.orderData.parameters.consideration.length
+            },
+            signature: listing.orderData.signature
+          },
+          '0x0000000000000000000000000000000000000000000000000000000000000000'
+        ],
+        account: this.account
       })
 
-      const response = await executeAllActions()
-      return { hash: response.hash }
+      const hash = await this.signer.writeContract(request)
+      return { hash }
     } catch (error) {
       console.error('Error fulfilling Seaport order:', error)
       throw error
     }
   }
 
-  async cancelListing(orderHash) {
+  async cancelListing(orderComponents) {
     try {
-      const tx = await this.seaport.cancelOrders([orderHash], this.account)
-      const response = await tx.wait()
-      return { hash: response.transactionHash }
+      // For Seaport, we need to cancel using the order components
+      const { request } = await this.publicClient.simulateContract({
+        address: SEAPORT_ADDRESS,
+        abi: [{
+          name: 'cancel',
+          type: 'function',
+          stateMutability: 'nonpayable',
+          inputs: [{
+            name: 'orders',
+            type: 'tuple[]',
+            components: [
+              { name: 'offerer', type: 'address' },
+              { name: 'zone', type: 'address' },
+              { name: 'offer', type: 'tuple[]', components: [
+                { name: 'itemType', type: 'uint8' },
+                { name: 'token', type: 'address' },
+                { name: 'identifierOrCriteria', type: 'uint256' },
+                { name: 'startAmount', type: 'uint256' },
+                { name: 'endAmount', type: 'uint256' }
+              ]},
+              { name: 'consideration', type: 'tuple[]', components: [
+                { name: 'itemType', type: 'uint8' },
+                { name: 'token', type: 'address' },
+                { name: 'identifierOrCriteria', type: 'uint256' },
+                { name: 'startAmount', type: 'uint256' },
+                { name: 'endAmount', type: 'uint256' },
+                { name: 'recipient', type: 'address' }
+              ]},
+              { name: 'orderType', type: 'uint8' },
+              { name: 'startTime', type: 'uint256' },
+              { name: 'endTime', type: 'uint256' },
+              { name: 'zoneHash', type: 'bytes32' },
+              { name: 'salt', type: 'uint256' },
+              { name: 'conduitKey', type: 'bytes32' },
+              { name: 'counter', type: 'uint256' }
+            ]
+          }],
+          outputs: [{ name: 'cancelled', type: 'bool' }]
+        }],
+        functionName: 'cancel',
+        args: [[orderComponents]],
+        account: this.account
+      })
+
+      const hash = await this.signer.writeContract(request)
+      return { hash }
     } catch (error) {
       console.error('Error cancelling Seaport order:', error)
       throw error
@@ -305,51 +489,9 @@ export class SeaportAdapter extends MarketplaceAdapter {
   }
 
   async makeOffer(nft, amount) {
-    const amountInWei = parseUnits(amount.toString(), 6)
-    const { sellerAmount, feeAmount } = calculateFeeAmounts(amountInWei.toString())
-    
-    const endTime = Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60) // 30 days
-
-    const order = {
-      offer: [{
-        itemType: ItemType.ERC20,
-        token: USDC_ADDRESS,
-        amount: amountInWei.toString()
-      }],
-      consideration: [
-        {
-          itemType: nft.isERC721 ? ItemType.ERC721 : ItemType.ERC1155,
-          token: nft.contract,
-          identifier: nft.tokenId.toString(),
-          amount: "1",
-          recipient: this.account
-        },
-        {
-          itemType: ItemType.ERC20,
-          token: USDC_ADDRESS,
-          amount: feeAmount,
-          recipient: FEE_RECIPIENT
-        }
-      ],
-      endTime,
-      orderType: OrderType.FULL_OPEN
-    }
-
-    try {
-      const { executeAllActions } = await this.seaport.createOrder(
-        order,
-        this.account
-      )
-      
-      const response = await executeAllActions()
-      return { 
-        hash: response.orderHash || response.hash,
-        contractType: 'seaport'
-      }
-    } catch (error) {
-      console.error('Error creating Seaport offer:', error)
-      throw error
-    }
+    // For now, Seaport offers work similarly to listings but with reversed offer/consideration
+    // This would need the same treatment as createListing with proper EIP-712 signing
+    throw new Error('Seaport offers not yet implemented in simplified adapter')
   }
 
   async acceptOffer(offer) {

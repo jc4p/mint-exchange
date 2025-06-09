@@ -238,9 +238,17 @@ export class ListingDetails extends BaseElement {
       const listing = await response.json()
       
       // Cancel the listing on the smart contract
-      // For Seaport, we need to pass the order hash instead of listing ID
-      const listingIdOrOrderHash = listing.contractType === 'seaport' ? listing.orderHash : listing.blockchainListingId
-      const cancelTxHash = await transactionManager.cancelListing(listingIdOrOrderHash, listing.contractType || 'nft_exchange')
+      let cancelTxHash
+      if (listing.contractType === 'seaport') {
+        // For Seaport, we need the full order parameters to cancel
+        if (!listing.orderData || !listing.orderData.parameters) {
+          throw new Error('Missing order data for Seaport cancellation')
+        }
+        cancelTxHash = await transactionManager.cancelListing(listing.orderData.parameters, 'seaport')
+      } else {
+        // For NFTExchange, use the blockchain listing ID
+        cancelTxHash = await transactionManager.cancelListing(listing.blockchainListingId, 'nft_exchange')
+      }
 
       // Notify backend immediately about the cancellation
       if (actionBtn) {

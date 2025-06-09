@@ -475,18 +475,12 @@ export class Database {
              l.image_url, l.name as nft_name, l.contract_type as listing_contract_type
       FROM activity a
       LEFT JOIN users u ON u.fid = a.actor_fid
-      LEFT JOIN listings l ON (
-        -- Attempt to join on blockchain_listing_id if present in metadata for older activities
-        -- This is a best-effort join and might need refinement based on how Seaport activity is recorded.
-        (a.metadata LIKE '%"blockchain_listing_id":"' || l.blockchain_listing_id || '"%') OR
-        -- Join condition for newer activities or if order_hash is available in metadata
-        (a.metadata LIKE '%"order_hash":"' || l.order_hash || '"%') OR
-        -- Fallback join for general NFT context if specific IDs aren't in metadata
-        (l.nft_contract = a.nft_contract AND l.token_id = a.token_id AND l.id = (
-          SELECT id FROM listings lr
-          WHERE lr.nft_contract = a.nft_contract AND lr.token_id = a.token_id
-          ORDER BY lr.created_at DESC LIMIT 1
-        ))
+      LEFT JOIN listings l ON l.id = (
+        SELECT id FROM listings lr
+        WHERE lr.nft_contract = a.nft_contract 
+          AND lr.token_id = a.token_id
+        ORDER BY lr.created_at DESC 
+        LIMIT 1
       )
       ${whereClause}
       ORDER BY a.created_at DESC

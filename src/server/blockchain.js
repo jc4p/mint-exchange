@@ -572,9 +572,7 @@ export class BlockchainService {
         log: log
       }
     } catch (error) {
-      if (!error.message?.includes('event "OrderFulfilled" not found on ABI') && !error.message?.includes('data is required')) {
-        console.error('Error decoding Seaport OrderFulfilled event:', error, log)
-      }
+      // Silently ignore unknown event signatures and other decoding errors
       return null
     }
   }
@@ -689,9 +687,7 @@ export class BlockchainService {
         log: log
       }
     } catch (error) {
-      if (!error.message?.includes('event "OrderCancelled" not found on ABI') && !error.message?.includes('data is required')) {
-        console.error('Error decoding Seaport OrderCancelled event:', error, log)
-      }
+      // Silently ignore unknown event signatures and other decoding errors
       return null
     }
   }
@@ -765,9 +761,7 @@ export class BlockchainService {
         log: log
       }
     } catch (error) {
-      if (!error.message?.includes('event "OrdersMatched" not found on ABI') && !error.message?.includes('data is required')) {
-        console.error('Error decoding Seaport OrdersMatched event:', error, log)
-      }
+      // Silently ignore unknown event signatures and other decoding errors
       return null
     }
   }
@@ -780,12 +774,12 @@ export class BlockchainService {
   async processSeaportOrdersMatched(decodedEvent, db) {
     if (!decodedEvent) return
 
-    console.log('Processing Seaport OrdersMatched:', decodedEvent)
+    // console.log('Processing Seaport OrdersMatched:', decodedEvent)
     const { orderHashes, transactionHash } = decodedEvent
 
     // Check if orderHashes exists and is iterable
     if (!orderHashes || !Array.isArray(orderHashes)) {
-      console.log('OrdersMatched event has no orderHashes array, skipping')
+      // console.log('OrdersMatched event has no orderHashes array, skipping')
       return
     }
 

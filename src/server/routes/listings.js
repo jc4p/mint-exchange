@@ -251,11 +251,14 @@ listings.post('/', authMiddleware(), async (c) => {
       //   return c.json({ error: 'Seaport order signature is required' }, 400);
       // }
 
-      const orderParameters = body.orderParameters;
+      // Handle both formats: direct parameters or wrapped in { parameters, signature }
+      const orderData = body.orderParameters;
+      const orderParameters = orderData.parameters || orderData;
+      const signature = orderData.signature || body.signature;
 
       // Extract necessary data from orderParameters
       const sellerAddress = orderParameters.offerer;
-      const nftOfferItem = orderParameters.offer.find(item => item.itemType === 2 /* ERC721 */ || item.itemType === 3 /* ERC1155 */);
+      const nftOfferItem = orderParameters.offer?.find(item => item.itemType === 2 /* ERC721 */ || item.itemType === 3 /* ERC1155 */);
       if (!nftOfferItem) {
         return c.json({ error: 'Valid NFT (ERC721/ERC1155) must be in offer items' }, 400);
       }
@@ -319,7 +322,7 @@ listings.post('/', authMiddleware(), async (c) => {
         description: metadata.description || '',
         contract_type: 'seaport',
         order_hash: orderHash,
-        order_parameters: JSON.stringify(orderParameters), // Store the full parameters
+        order_parameters: JSON.stringify({ parameters: orderParameters, signature }), // Store parameters + signature
         zone_address: orderParameters.zone?.toLowerCase(),
         conduit_key: orderParameters.conduitKey,
         salt: orderParameters.salt,
