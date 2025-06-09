@@ -33,6 +33,13 @@ CREATE TABLE listings (
   buyer_address VARCHAR(42), -- Address that bought onchain
   sale_tx_hash VARCHAR(66),
   cancel_tx_hash VARCHAR(66),
+  contract_type VARCHAR(20) DEFAULT 'nft_exchange',
+  order_hash VARCHAR(66) DEFAULT NULL,
+  order_parameters TEXT DEFAULT NULL,
+  zone_address VARCHAR(42) DEFAULT NULL,
+  conduit_key VARCHAR(66) DEFAULT NULL,
+  salt VARCHAR(66) DEFAULT NULL,
+  counter INTEGER DEFAULT NULL,
   FOREIGN KEY (seller_fid) REFERENCES users(fid),
   FOREIGN KEY (buyer_fid) REFERENCES users(fid)
 );
@@ -44,17 +51,7 @@ CREATE INDEX idx_seller_fid ON listings(seller_fid);
 CREATE INDEX idx_buyer_fid ON listings(buyer_fid);
 CREATE INDEX idx_blockchain_listing ON listings(blockchain_listing_id);
 CREATE INDEX idx_seller_address ON listings(seller_address);
-
--- New columns for Seaport listings
-ALTER TABLE listings ADD COLUMN contract_type VARCHAR(20) DEFAULT 'nft_exchange';
-ALTER TABLE listings ADD COLUMN order_hash VARCHAR(66);
-ALTER TABLE listings ADD COLUMN order_parameters TEXT;
-ALTER TABLE listings ADD COLUMN zone_address VARCHAR(42);
-ALTER TABLE listings ADD COLUMN conduit_key VARCHAR(66);
-ALTER TABLE listings ADD COLUMN salt VARCHAR(66);
-ALTER TABLE listings ADD COLUMN counter INTEGER;
-
--- Indexes for new columns
+-- Indexes for new columns (preserved, originally Seaport specific)
 CREATE INDEX idx_listings_contract_type ON listings(contract_type);
 CREATE INDEX idx_listings_order_hash ON listings(order_hash) WHERE order_hash IS NOT NULL;
 
