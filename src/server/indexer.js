@@ -126,9 +126,19 @@ export class EventIndexer {
     // Process each log in the transaction
     for (const log of logs) {
       try {
-        // Only process logs from our contract
-        if (log.address.toLowerCase() !== this.env.CONTRACT_ADDRESS.toLowerCase()) {
-          continue
+        // Only process logs from our known contracts (NFTExchange or Seaport)
+        const lowerCaseLogAddress = log.address.toLowerCase();
+        const knownContracts = [];
+        if (this.env.CONTRACT_ADDRESS) {
+          knownContracts.push(this.env.CONTRACT_ADDRESS.toLowerCase());
+        }
+        if (this.env.SEAPORT_CONTRACT_ADDRESS) {
+          knownContracts.push(this.env.SEAPORT_CONTRACT_ADDRESS.toLowerCase());
+        }
+
+        if (!knownContracts.includes(lowerCaseLogAddress)) {
+          // console.log(`Webhook log from unknown address ${log.address}, skipping.`);
+          continue;
         }
 
         // Create a viem-compatible log object

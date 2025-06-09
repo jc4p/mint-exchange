@@ -36,12 +36,25 @@ export class Database {
   }
 
   // Listing operations
-  async getActiveListings({ page = 1, limit = 20, sort = 'recent', sellerFid = null, search = null }) {
+  async getListing(listingId) {
+    return await this.db
+      .prepare(`
+        SELECT l.*, u.username, u.display_name, u.pfp_url
+        FROM listings l
+        LEFT JOIN users u ON u.fid = l.seller_fid
+        WHERE l.id = ?
+      `)
+      .bind(listingId)
+      .first()
+  }
+
+  async getActiveListings({ page = 1, limit = 20, sort = 'recent', sellerFid = null, search = null, contractType = null }) {
     const offset = (page - 1) * limit
-    let orderBy = 'created_at DESC'
+    let orderBy = 'l.created_at DESC' // Default to l.created_at for listings
     
-    if (sort === 'price_low') orderBy = 'price ASC'
-    else if (sort === 'price_high') orderBy = 'price DESC'
+    if (sort === 'price_low') orderBy = 'l.price ASC'
+    else if (sort === 'price_high') orderBy = 'l.price DESC'
+    // Add other sort options as needed, e.g., 'l.expiry ASC' for ending soon
     
     // Build WHERE conditions
     const conditions = [
@@ -51,6 +64,7 @@ export class Database {
     ]
     
     const params = []
+
     if (sellerFid) {
       conditions.push('l.seller_fid = ?')
       params.push(sellerFid)
@@ -59,6 +73,11 @@ export class Database {
     if (search) {
       conditions.push('(LOWER(l.name) LIKE ? OR LOWER(l.description) LIKE ?)')
       params.push(`%${search.toLowerCase()}%`, `%${search.toLowerCase()}%`)
+    }
+
+    if (contractType) {
+      conditions.push('l.contract_type = ?')
+      params.push(contractType)
     }
     
     const whereClause = `WHERE ${conditions.join(' AND ')}`
@@ -72,26 +91,30 @@ export class Database {
       LIMIT ? OFFSET ?
     `
     
-    params.push(limit, offset)
+    params.push(limit, offset) // Add limit and offset to the main query params
     
     const results = await this.db
       .prepare(query)
       .bind(...params)
       .all()
     
+    // For totalQuery, params should not include limit and offset
+    const totalParams = []
+    if (sellerFid) totalParams.push(sellerFid)
+    if (search) {
+      totalParams.push(`%${search.toLowerCase()}%`, `%${search.toLowerCase()}%`)
+    }
+    if (contractType) totalParams.push(contractType)
+
     const totalQuery = `
       SELECT COUNT(*) as count
       FROM listings l
       ${whereClause}
     `
-    
-    const totalParams = sellerFid ? [sellerFid] : []
-    if (search) {
-      totalParams.push(`%${search.toLowerCase()}%`, `%${search.toLowerCase()}%`)
-    }
+
     const total = await this.db
       .prepare(totalQuery)
-      .bind(...totalParams)
+      .bind(...totalParams) // Use params specific to the count query
       .first()
     
     return {
@@ -103,18 +126,6 @@ export class Database {
         hasMore: offset + limit < total.count
       }
     }
-  }
-
-  async getListing(listingId) {
-    return await this.db
-      .prepare(`
-        SELECT l.*, u.username, u.display_name, u.pfp_url
-        FROM listings l
-        LEFT JOIN users u ON u.fid = l.seller_fid
-        WHERE l.id = ?
-      `)
-      .bind(listingId)
-      .first()
   }
 
   async createListing(listingData) {
@@ -130,7 +141,14 @@ export class Database {
       image_url,
       name,
       description,
-      tx_hash
+      tx_hash,
+      contract_type = 'nft_exchange', // Default to 'nft_exchange'
+      order_hash,
+      order_parameters,
+      zone_address,
+      conduit_key,
+      salt,
+      counter
     } = listingData
     
     // Check if listing already exists with this blockchain_listing_id
@@ -171,8 +189,9 @@ export class Database {
       .prepare(`
         INSERT INTO listings (
           blockchain_listing_id, seller_fid, seller_address, nft_contract, token_id,
-          price, expiry, metadata_uri, image_url, name, description, tx_hash
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          price, expiry, metadata_uri, image_url, name, description, tx_hash,
+          contract_type, order_hash, order_parameters, zone_address, conduit_key, salt, counter
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .bind(
         blockchain_listing_id || null,
@@ -186,7 +205,14 @@ export class Database {
         image_url,
         name,
         description,
-        tx_hash || null
+        tx_hash || null,
+        contract_type,
+        order_hash || null,
+        order_parameters || null,
+        zone_address || null,
+        conduit_key || null,
+        salt || null,
+        counter || null
       )
       .run()
     
@@ -198,8 +224,9 @@ export class Database {
       nft_contract,
       token_id,
       price,
-      metadata: JSON.stringify({ listing_id: result.meta.last_row_id }),
-      tx_hash
+      metadata: JSON.stringify({ listing_id: result.meta.last_row_id, contract_type }), // Added contract_type to metadata
+      tx_hash,
+      contract_type // Pass contract_type to recordActivity
     })
     
     return result
@@ -292,9 +319,94 @@ export class Database {
     })
   }
 
+  async markSeaportListingSoldByOrderHash(saleData) {
+    const { orderHash, buyerAddress, buyerFid, saleTxHash, contractType, totalPriceFromEvent } = saleData
+
+    const listing = await this.db
+      .prepare("SELECT * FROM listings WHERE order_hash = ? AND contract_type = 'seaport'")
+      .bind(orderHash)
+      .first()
+
+    if (!listing) {
+      // Silently return if listing not found (it's not ours)
+      return { changes: 0, message: 'Listing not found.' }
+    }
+
+    if (listing.sold_at) {
+      console.warn(`Seaport listing with orderHash ${orderHash} is already marked as sold.`)
+      // Potentially return or throw specific error if needed
+      return { changes: 0, last_row_id: listing.id, message: 'Listing already sold.' }
+    }
+    if (listing.cancelled_at) {
+      console.warn(`Seaport listing with orderHash ${orderHash} is already cancelled. Cannot mark as sold.`)
+      throw new Error(`Listing with orderHash ${orderHash} is already cancelled.`)
+    }
+
+    // Optional: Compare totalPriceFromEvent with listing.price
+    if (totalPriceFromEvent !== undefined && listing.price !== totalPriceFromEvent) {
+        console.warn(`Price mismatch for orderHash ${orderHash}: DB price ${listing.price}, Event price ${totalPriceFromEvent}`);
+        // Decide if this should be an error or just a warning
+    }
+
+    return await this.db
+      .prepare(`
+        UPDATE listings
+        SET sold_at = CURRENT_TIMESTAMP,
+            buyer_fid = ?,
+            buyer_address = ?,
+            sale_tx_hash = ?
+        WHERE order_hash = ? AND contract_type = ?
+      `)
+      .bind(
+        buyerFid,
+        buyerAddress ? buyerAddress.toLowerCase() : null,
+        saleTxHash,
+        orderHash,
+        contractType
+      )
+      .run()
+  }
+
+  async cancelSeaportListingByOrderHash(cancelData) {
+    const { orderHash, cancellerAddress, cancelTxHash, contractType } = cancelData
+
+    const listing = await this.db
+      .prepare("SELECT * FROM listings WHERE order_hash = ? AND contract_type = 'seaport'")
+      .bind(orderHash)
+      .first()
+
+    if (!listing) {
+      // Silently return if listing not found (it's not ours)
+      return { changes: 0, message: 'Listing not found.' }
+    }
+    if (listing.sold_at) {
+      console.warn(`Seaport listing with orderHash ${orderHash} is already sold. Cannot cancel.`)
+      throw new Error(`Listing with orderHash ${orderHash} is already sold.`)
+    }
+    if (listing.cancelled_at) {
+      console.warn(`Seaport listing with orderHash ${orderHash} is already cancelled.`)
+      return { changes: 0, last_row_id: listing.id, message: 'Listing already cancelled.' }
+    }
+
+    if (listing.seller_address.toLowerCase() !== cancellerAddress.toLowerCase()) {
+      console.error(`Attempt to cancel Seaport listing ${orderHash} by non-seller. Expected ${listing.seller_address}, got ${cancellerAddress}`)
+      throw new Error('Only the seller can cancel this Seaport listing.')
+    }
+
+    return await this.db
+      .prepare(`
+        UPDATE listings
+        SET cancelled_at = CURRENT_TIMESTAMP,
+            cancel_tx_hash = ?
+        WHERE order_hash = ? AND contract_type = ?
+      `)
+      .bind(cancelTxHash, orderHash, contractType)
+      .run()
+  }
+
   // Activity operations
   async recordActivity(activityData) {
-    const { type, actor_fid, actor_address, nft_contract, token_id, price, metadata, tx_hash } = activityData
+    const { type, actor_fid, actor_address, nft_contract, token_id, price, metadata, tx_hash, contract_type } = activityData
     
     // Check if activity with this tx_hash already exists to prevent duplicates
     if (tx_hash) {
@@ -314,8 +426,8 @@ export class Database {
     
     return await this.db
       .prepare(`
-        INSERT INTO activity (type, actor_fid, actor_address, nft_contract, token_id, price, metadata, tx_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO activity (type, actor_fid, actor_address, nft_contract, token_id, price, metadata, tx_hash, contract_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       .bind(
         type,
@@ -325,7 +437,8 @@ export class Database {
         token_id || null,
         price || null,
         metadata || null,
-        tx_hash || null
+        tx_hash || null,
+        contract_type || null // Add contract_type here
       )
       .run()
   }
@@ -359,18 +472,15 @@ export class Database {
     
     const query = `
       SELECT a.*, u.username, u.display_name, u.pfp_url,
-             l.image_url, l.name as nft_name
+             l.image_url, l.name as nft_name, l.contract_type as listing_contract_type
       FROM activity a
       LEFT JOIN users u ON u.fid = a.actor_fid
-      LEFT JOIN listings l ON (
-        l.nft_contract = a.nft_contract 
-        AND l.token_id = a.token_id
-        AND l.blockchain_listing_id = (
-          SELECT MAX(blockchain_listing_id) 
-          FROM listings 
-          WHERE nft_contract = a.nft_contract 
-          AND token_id = a.token_id
-        )
+      LEFT JOIN listings l ON l.id = (
+        SELECT id FROM listings lr
+        WHERE lr.nft_contract = a.nft_contract 
+          AND lr.token_id = a.token_id
+        ORDER BY lr.created_at DESC 
+        LIMIT 1
       )
       ${whereClause}
       ORDER BY a.created_at DESC
@@ -414,34 +524,37 @@ export class Database {
       // Active listings
       this.db
         .prepare(`
-          SELECT COUNT(*) as count, SUM(price) as total_value
+          SELECT COUNT(*) as count, SUM(price) as total_value, contract_type, order_hash, order_parameters, zone_address, conduit_key, salt, counter
           FROM listings
           WHERE seller_fid = ?
             AND sold_at IS NULL
             AND cancelled_at IS NULL
             AND expiry > datetime('now')
+          GROUP BY contract_type, order_hash, order_parameters, zone_address, conduit_key, salt, counter
         `)
         .bind(fid)
-        .first(),
+        .first(), // This might need to be .all() if listings can have multiple contract_types
       
       // Sales - count listings that were sold by this user
       this.db
         .prepare(`
-          SELECT COUNT(*) as count, SUM(l.price) as total_volume
+          SELECT COUNT(*) as count, SUM(l.price) as total_volume, l.contract_type, l.order_hash
           FROM listings l
           WHERE l.seller_fid = ?
             AND l.sold_at IS NOT NULL
+          GROUP BY l.contract_type, l.order_hash
         `)
         .bind(fid)
-        .first(),
+        .first(), // This might need to be .all()
       
       // Purchases
       this.db
         .prepare(`
-          SELECT COUNT(*) as count, SUM(price) as total_spent
+          SELECT COUNT(*) as count, SUM(price) as total_spent, contract_type, order_hash
           FROM listings
           WHERE buyer_fid = ?
             AND sold_at IS NOT NULL
+          GROUP BY contract_type, order_hash
         `)
         .bind(fid)
         .first()
@@ -471,7 +584,14 @@ export class Database {
         l.description,
         l.price as purchase_price,
         l.sold_at as purchased_at,
-        l.sale_tx_hash
+        l.sale_tx_hash,
+        l.contract_type,
+        l.order_hash,
+        l.order_parameters,
+        l.zone_address,
+        l.conduit_key,
+        l.salt,
+        l.counter
       FROM listings l
       WHERE l.buyer_fid = ?
         AND l.sold_at IS NOT NULL
@@ -513,6 +633,13 @@ export class Database {
       .prepare(`
         SELECT 
           nft_contract,
+          contract_type,
+          order_hash,
+          order_parameters,
+          zone_address,
+          conduit_key,
+          salt,
+          counter,
           COUNT(*) as listing_count,
           MIN(name) as sample_name,
           MIN(image_url) as sample_image
@@ -520,7 +647,7 @@ export class Database {
         WHERE sold_at IS NULL
           AND cancelled_at IS NULL
           AND expiry > datetime('now')
-        GROUP BY nft_contract
+        GROUP BY nft_contract, contract_type, order_hash, order_parameters, zone_address, conduit_key, salt, counter
         ORDER BY listing_count DESC
         LIMIT 1
       `)
@@ -535,7 +662,7 @@ export class Database {
     // Get sample listings for the collection
     const sampleListings = await this.db
       .prepare(`
-        SELECT id, name, image_url, price
+        SELECT id, name, image_url, price, contract_type, order_hash, order_parameters, zone_address, conduit_key, salt, counter
         FROM listings
         WHERE nft_contract = ?
           AND sold_at IS NULL

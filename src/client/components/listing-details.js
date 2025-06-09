@@ -2,6 +2,7 @@ import { BaseElement } from './base-element.js'
 import { EVENTS } from '../utils/events.js'
 import { transactionManager } from '../utils/transactions.js'
 import { showAlert, showConfirm } from './modal.js'
+import { detectTokenStandardCached } from '../utils/token-standard.js'
 
 export class ListingDetails extends BaseElement {
   constructor() {
@@ -168,14 +169,15 @@ export class ListingDetails extends BaseElement {
         actionBtn.textContent = 'Approving USDC...'
       }
       
-      await transactionManager.approveUSDC(listing.price)
+      await transactionManager.approveUSDC(listing.price, listing.contractType || 'nft_exchange')
 
       // Then purchase NFT
       if (actionBtn) {
         actionBtn.textContent = 'Purchasing NFT...'
       }
       
-      const purchaseTxHash = await transactionManager.buyListing(listing.blockchainListingId)
+      // Pass the full listing object for Seaport orders
+      const purchaseTxHash = await transactionManager.buyListing(listing)
 
       // Notify backend immediately about the purchase
       if (actionBtn) {
@@ -236,7 +238,17 @@ export class ListingDetails extends BaseElement {
       const listing = await response.json()
       
       // Cancel the listing on the smart contract
-      const cancelTxHash = await transactionManager.cancelListing(listing.blockchainListingId)
+      let cancelTxHash
+      if (listing.contractType === 'seaport') {
+        // For Seaport, we need the full order parameters to cancel
+        if (!listing.orderData || !listing.orderData.parameters) {
+          throw new Error('Missing order data for Seaport cancellation')
+        }
+        cancelTxHash = await transactionManager.cancelListing(listing.orderData.parameters, 'seaport')
+      } else {
+        // For NFTExchange, use the blockchain listing ID
+        cancelTxHash = await transactionManager.cancelListing(listing.blockchainListingId, 'nft_exchange')
+      }
 
       // Notify backend immediately about the cancellation
       if (actionBtn) {

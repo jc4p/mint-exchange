@@ -2,6 +2,7 @@ import { BaseElement } from './base-element.js'
 import { EVENTS } from '../utils/events.js'
 import { transactionManager } from '../utils/transactions.js'
 import { showAlert, showSuccess } from './modal.js'
+import { detectTokenStandardCached } from '../utils/token-standard.js'
 
 export class CreateListing extends BaseElement {
   constructor() {
@@ -70,17 +71,37 @@ export class CreateListing extends BaseElement {
       // Check network first
       await transactionManager.checkNetwork()
       
+      // Detect token standard for proxy contract compatibility
+      console.log('Detecting NFT token standard...')
+      const { publicClient } = await transactionManager.getViemClients()
+      const tokenStandard = await detectTokenStandardCached(
+        nft.contract.address,
+        nft.tokenId,
+        publicClient,
+        await transactionManager.getWalletAddress()
+      )
+      const isERC1155 = tokenStandard === 'ERC1155'
+      console.log(`NFT is ${tokenStandard}`)
+      
       // Create listing on blockchain
-      console.log('Creating listing on blockchain...')
-      const txHash = await transactionManager.createListing(
+      console.log('Creating listing on blockchain using Seaport...')
+      const result = await transactionManager.createListing(
         nft.contract.address,
         nft.tokenId,
         parseFloat(price),
         expiryDays,
-        false // Assuming ERC721 for now, can be enhanced to detect standard
+        isERC1155,
+        true   // Always use Seaport for new listings
       )
       
-      console.log('Transaction submitted:', txHash)
+      // Extract txHash and order data
+      // For Seaport, there's no transaction - just a signed order
+      const isSeaportOrder = typeof result === 'object' && result.contractType === 'seaport'
+      const txHash = isSeaportOrder ? null : (typeof result === 'string' ? result : result.hash)
+      const orderData = typeof result === 'object' ? result.order : null
+      const orderHash = isSeaportOrder ? result.hash : null
+      
+      console.log('Result:', { txHash, orderHash, orderData, isSeaportOrder })
       
       // Calculate expiry date
       const expiryDate = new Date()
@@ -98,13 +119,16 @@ export class CreateListing extends BaseElement {
           tokenId: nft.tokenId,
           price: price,
           expiry: expiryDate.toISOString(),
+          contractType: 'seaport', // Always Seaport for new listings
+          orderHash: orderHash, // Seaport order hash
+          orderParameters: orderData, // Include Seaport order data (parameters + signature)
           metadata: {
             name: nft.title,
             description: nft.description,
             image_url: nft.media[0]?.gateway || '',
             metadata_uri: ''
           },
-          txHash: txHash
+          txHash: txHash // Will be null for Seaport
         })
       })
       
@@ -438,7 +462,7 @@ export class CreateListing extends BaseElement {
                   />
                   <span class="price-suffix">USDC</span>
                 </div>
-                <p class="fee-notice">A 1% platform fee will be charged on purchase</p>
+                <p class="fee-notice">A 1% platform fee will be taken at the time of sale</p>
                 ${error ? `<p class="error-message">${error}</p>` : ''}
               </div>
               

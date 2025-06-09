@@ -109,7 +109,10 @@ export async function listingDetailsPage(c) {
   const listingData = {
     id: listing.id,
     sellerFid: listing.seller_fid,
-    price: listing.price
+    price: listing.price,
+    contractType: listing.contract_type,
+    orderHash: listing.order_hash,
+    blockchainListingId: listing.blockchain_listing_id
   }
   
   // Prepare frame metadata for this listing

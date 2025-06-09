@@ -1,11 +1,17 @@
 import { frameUtils } from '../components/frame-provider.js'
 import { EVENTS, emit, eventBus } from '../utils/events.js'
+import { createWalletClient, custom, createPublicClient, http } from 'viem'
+import { base } from 'viem/chains'
+import { getMarketplaceAdapter } from './marketplace-adapter.js'
+import { SEAPORT_ADDRESS, CONDUIT_ADDRESS } from './seaport-config.js'
 import { 
   ADDRESSES, 
   encodeNFTExchange, 
   encodeERC20, 
   encodeERC721,
   encodeERC1155,
+  ERC721_ABI,
+  ERC1155_ABI,
   toUSDCAmount,
   checkUSDCAllowance,
   checkUSDCBalance,
@@ -51,7 +57,27 @@ export class TransactionManager {
   }
 
   /**
-   * Send a transaction
+   * Get viem clients for blockchain interaction
+   */
+  async getViemClients() {
+    const account = await this.getWalletAddress()
+    
+    const walletClient = createWalletClient({
+      account,
+      chain: base,
+      transport: custom(this.ethProvider)
+    })
+    
+    const publicClient = createPublicClient({
+      chain: base,
+      transport: http('/api/rpc/proxy')
+    })
+    
+    return { walletClient, publicClient, account }
+  }
+
+  /**
+   * Send a transaction (legacy method for backward compatibility)
    */
   async sendTransaction(from, to, data, value = '0x0') {
     return await this.ethProvider.request({
@@ -105,120 +131,166 @@ export class TransactionManager {
     throw new Error(`Transaction ${txHash} not mined after ${maxWaitTime}ms`)
   }
 
-
   /**
-   * Create a new listing
+   * Create a new listing (defaults to Seaport)
    */
-  async createListing(nftContract, tokenId, price, durationInDays, isERC1155 = false) {
-    const userAddress = await this.getWalletAddress()
-    const priceInUSDC = toUSDCAmount(price)
-    const durationInSeconds = durationInDays * 24 * 60 * 60
-
+  async createListing(nftContract, tokenId, price, durationInDays, isERC1155 = false, useSeaport = true) {
+    const { walletClient, publicClient, account } = await this.getViemClients()
+    
     console.log('=== Starting createListing process ===')
-    console.log('User address:', userAddress)
+    console.log('User address:', account)
     console.log('NFT contract:', nftContract)
     console.log('Token ID:', tokenId)
-    console.log('NFT Exchange address:', ADDRESSES.NFT_EXCHANGE)
+    console.log('Using:', useSeaport ? 'Seaport' : 'NFTExchange')
 
     // First check if user owns the NFT
     console.log('Checking NFT ownership...')
-    const isOwner = await checkNFTOwnership(nftContract, tokenId, userAddress, isERC1155)
+    const isOwner = await checkNFTOwnership(nftContract, tokenId, account, isERC1155)
     if (!isOwner) {
       throw new Error('You do not own this NFT')
     }
     console.log('✅ Ownership confirmed')
 
-    // Check NFT approval
-    console.log('Checking current approval status...')
-    const isApproved = await checkNFTApproval(nftContract, tokenId, userAddress, isERC1155)
-    console.log('Current approval status:', isApproved)
-    
-    if (!isApproved) {
-      console.log('NFT not approved, sending approval transaction...')
-      let approveData
+    // Get the appropriate adapter
+    const adapter = getMarketplaceAdapter(
+      useSeaport ? 'seaport' : 'nftexchange',
+      walletClient,
+      account,
+      publicClient
+    )
+
+    // For Seaport, check NFT approval for conduit
+    if (useSeaport) {
+      console.log('Checking Seaport conduit approval...')
+      const approvalTarget = CONDUIT_ADDRESS
+      console.log('Conduit address:', approvalTarget)
+      console.log('Checking approval for:', { nftContract, account, approvalTarget, isERC1155 })
       
+      let isApproved = false
       if (isERC1155) {
-        // ERC1155 requires setApprovalForAll
-        approveData = encodeERC1155.setApprovalForAll(ADDRESSES.NFT_EXCHANGE, true)
-        console.log('Using ERC1155 setApprovalForAll')
+        console.log('Calling isApprovedForAll for ERC1155...')
+        try {
+          const approval = await publicClient.readContract({
+            address: nftContract,
+            abi: ERC1155_ABI,
+            functionName: 'isApprovedForAll',
+            args: [account, approvalTarget]
+          })
+          console.log('ERC1155 approval status:', approval)
+          isApproved = approval
+        } catch (error) {
+          console.error('Error checking ERC1155 approval:', error)
+          throw error
+        }
       } else {
-        // For ERC721, use specific token approval
-        approveData = encodeERC721.approve(ADDRESSES.NFT_EXCHANGE, tokenId)
-        console.log('Using ERC721 approve for token:', tokenId)
+        // For ERC721, check isApprovedForAll
+        console.log('Calling isApprovedForAll for ERC721...')
+        try {
+          const approval = await publicClient.readContract({
+            address: nftContract,
+            abi: ERC721_ABI,
+            functionName: 'isApprovedForAll',
+            args: [account, approvalTarget]
+          })
+          console.log('ERC721 approval status:', approval)
+          isApproved = approval
+        } catch (error) {
+          console.error('Error checking ERC721 approval:', error)
+          throw error
+        }
       }
-      
-      console.log('Sending approval transaction...')
-      const approveTx = await this.sendTransaction(userAddress, nftContract, approveData)
-      console.log('Approval transaction hash:', approveTx)
-      
-      // Wait for approval to be mined
-      console.log('Waiting for approval transaction to be mined...')
-      const approvalReceipt = await this.waitForTransaction(approveTx)
-      console.log('Approval transaction mined! Receipt:', approvalReceipt)
-      
-      // Wait an extra second for state to propagate
-      console.log('Waiting 1 second for state propagation...')
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      
-      // Double-check approval after waiting
-      console.log('Double-checking approval status...')
-      const isNowApproved = await checkNFTApproval(nftContract, tokenId, userAddress, isERC1155)
-      console.log('Approval status after waiting:', isNowApproved)
-      
-      if (!isNowApproved) {
-        throw new Error('NFT approval failed. The approval transaction was mined but the contract is still not approved.')
+
+      if (!isApproved) {
+        console.log('Approving NFT for Seaport conduit...')
+        let approveTx
+        
+        if (isERC1155) {
+          approveTx = await walletClient.writeContract({
+            address: nftContract,
+            abi: ERC1155_ABI,
+            functionName: 'setApprovalForAll',
+            args: [approvalTarget, true]
+          })
+        } else {
+          approveTx = await walletClient.writeContract({
+            address: nftContract,
+            abi: ERC721_ABI,
+            functionName: 'setApprovalForAll',
+            args: [approvalTarget, true]
+          })
+        }
+        
+        console.log('Approval transaction:', approveTx)
+        await this.waitForTransaction(approveTx)
+        console.log('✅ NFT approved for Seaport')
       }
-      console.log('✅ NFT approved successfully')
     } else {
-      console.log('✅ NFT already approved')
+      // Original NFTExchange approval logic
+      console.log('Checking current approval status...')
+      const isApproved = await checkNFTApproval(nftContract, tokenId, account, isERC1155)
+      console.log('Current approval status:', isApproved)
+      
+      if (!isApproved) {
+        console.log('NFT not approved, sending approval transaction...')
+        let approveData
+        
+        if (isERC1155) {
+          approveData = encodeERC1155.setApprovalForAll(ADDRESSES.NFT_EXCHANGE, true)
+        } else {
+          approveData = encodeERC721.approve(ADDRESSES.NFT_EXCHANGE, tokenId)
+        }
+        
+        const approveTx = await this.sendTransaction(account, nftContract, approveData)
+        console.log('Approval transaction hash:', approveTx)
+        
+        await this.waitForTransaction(approveTx)
+        console.log('✅ NFT approved successfully')
+      }
     }
 
-    // Create the listing
-    console.log('Creating listing with params:', {
-      nftContract,
+    // Create the listing through the adapter
+    console.log('Creating listing through adapter...')
+    console.log('Adapter type:', useSeaport ? 'Seaport' : 'NFTExchange')
+    console.log('Listing parameters:', {
+      contract: nftContract,
       tokenId,
-      priceInUSDC: priceInUSDC.toString(),
-      durationInSeconds,
-      userAddress
+      isERC721: !isERC1155,
+      price,
+      duration: durationInDays * 24 * 60 * 60
     })
     
     try {
-      const createData = encodeNFTExchange.createListing(nftContract, tokenId, priceInUSDC, durationInSeconds)
-      console.log('Encoded createListing data:', createData)
+      const result = await adapter.createListing(
+        { contract: nftContract, tokenId, isERC721: !isERC1155 },
+        price,
+        durationInDays * 24 * 60 * 60
+      )
       
-      console.log('Sending createListing transaction...')
-      const createTx = await this.sendTransaction(userAddress, ADDRESSES.NFT_EXCHANGE, createData)
-      console.log('✅ Create listing transaction sent:', createTx)
-      
-      return createTx
+      console.log('✅ Listing created:', result)
+      // For Seaport, return the full result including order data
+      if (useSeaport && result.order) {
+        return result
+      }
+      // For NFTExchange, just return the hash for backward compatibility
+      return result.hash
     } catch (error) {
       console.error('❌ Create listing failed:', error)
-      console.error('Full error:', JSON.stringify(error, null, 2))
-      
-      if (error.message?.includes('UnauthorizedCaller')) {
-        // Let's check the approval status one more time
-        const finalApprovalCheck = await checkNFTApproval(nftContract, tokenId, userAddress, isERC1155)
-        console.error('Final approval check:', finalApprovalCheck)
-        
-        throw new Error(`The NFT Exchange contract is not authorized to transfer your NFT. 
-          Approval status: ${finalApprovalCheck}. 
-          This might be a timing issue. Please try again in a few seconds.`)
-      }
       throw error
     }
   }
 
   /**
-   * Approve USDC spending
+   * Approve USDC spending for the appropriate contract
    */
-  async approveUSDC(amount) {
+  async approveUSDC(amount, contractType = 'seaport') {
     const userAddress = await this.getWalletAddress()
     const amountInUSDC = toUSDCAmount(amount)
+    const spenderAddress = contractType === 'seaport' ? SEAPORT_ADDRESS : ADDRESSES.NFT_EXCHANGE
     
-    console.log('Approving USDC:', amount, 'USDC')
+    console.log('Approving USDC:', amount, 'USDC for', contractType)
     
     // Check current allowance
-    const allowance = await checkUSDCAllowance(userAddress, ADDRESSES.NFT_EXCHANGE)
+    const allowance = await checkUSDCAllowance(userAddress, spenderAddress)
     
     if (allowance >= amountInUSDC) {
       console.log('USDC already approved')
@@ -226,7 +298,7 @@ export class TransactionManager {
     }
     
     // Approve USDC
-    const approveData = encodeERC20.approve(ADDRESSES.NFT_EXCHANGE, amountInUSDC)
+    const approveData = encodeERC20.approve(spenderAddress, amountInUSDC)
     const approveTx = await this.sendTransaction(userAddress, ADDRESSES.USDC, approveData)
     console.log('USDC approval tx:', approveTx)
     
@@ -237,107 +309,163 @@ export class TransactionManager {
   }
 
   /**
-   * Buy a listing
+   * Buy a listing (works for both NFTExchange and Seaport)
    */
-  async buyListing(listingId) {
-    const userAddress = await this.getWalletAddress()
+  async buyListing(listing) {
+    const { walletClient, publicClient, account } = await this.getViemClients()
     
-    console.log('Buying listing:', listingId)
+    console.log('Buying listing:', listing)
     
-    // Note: The calling code should have already approved USDC
-    // This just sends the buy transaction
-    const buyData = encodeNFTExchange.buyListing(listingId)
-    const buyTx = await this.sendTransaction(userAddress, ADDRESSES.NFT_EXCHANGE, buyData)
-    console.log('Buy listing tx:', buyTx)
+    // Determine contract type from listing
+    const contractType = listing.contractType || 'nftexchange'
+    const adapter = getMarketplaceAdapter(contractType, walletClient, account, publicClient)
+
+    // For Seaport, approve USDC if needed
+    if (contractType === 'seaport') {
+      await this.approveUSDC(listing.price, 'seaport')
+    }
     
-    return buyTx
+    const result = await adapter.buyListing(listing)
+    return result.hash
   }
 
   /**
    * Cancel a listing
    */
-  async cancelListing(listingId) {
-    const userAddress = await this.getWalletAddress()
-    const cancelData = encodeNFTExchange.cancelListing(listingId)
-    return await this.sendTransaction(userAddress, ADDRESSES.NFT_EXCHANGE, cancelData)
+  async cancelListing(listingId, contractType = 'nftexchange') {
+    const { walletClient, publicClient, account } = await this.getViemClients()
+    const adapter = getMarketplaceAdapter(contractType, walletClient, account, publicClient)
+    
+    const result = await adapter.cancelListing(listingId)
+    return result.hash
   }
 
   /**
    * Make an offer on an NFT
    */
-  async makeOffer(nftContract, tokenId, offerAmount, durationInDays) {
-    const userAddress = await this.getWalletAddress()
-    const amountInUSDC = toUSDCAmount(offerAmount)
-    const durationInSeconds = durationInDays * 24 * 60 * 60
+  async makeOffer(nftContract, tokenId, offerAmount, durationInDays, useSeaport = true) {
+    const { walletClient, publicClient, account } = await this.getViemClients()
+    const adapter = getMarketplaceAdapter(
+      useSeaport ? 'seaport' : 'nftexchange',
+      walletClient,
+      account,
+      publicClient
+    )
 
     // Check USDC balance
-    const balance = await checkUSDCBalance(userAddress)
+    const amountInUSDC = toUSDCAmount(offerAmount)
+    const balance = await checkUSDCBalance(account)
     if (balance < amountInUSDC) {
       throw new Error(`Insufficient USDC balance. You have ${Number(balance) / 1e6} USDC, need ${offerAmount} USDC`)
     }
 
-    // Check USDC allowance
-    const allowance = await checkUSDCAllowance(userAddress, ADDRESSES.NFT_EXCHANGE)
-    
-    // If allowance is insufficient, approve USDC
-    if (allowance < amountInUSDC) {
-      console.log('Approving USDC for offer...')
-      const approveData = encodeERC20.approve(ADDRESSES.NFT_EXCHANGE, amountInUSDC)
-      const approveTx = await this.sendTransaction(userAddress, ADDRESSES.USDC, approveData)
-      console.log('USDC approval tx:', approveTx)
-      
-      // Wait for approval to be mined
-      await this.waitForTransaction(approveTx)
-    }
+    // Detect token standard for proxy contract compatibility
+    const { detectTokenStandardCached } = await import('./token-standard.js')
+    const tokenStandard = await detectTokenStandardCached(nftContract, tokenId, publicClient)
+    const isERC721 = tokenStandard === 'ERC721'
+
+    // Approve USDC for the appropriate contract
+    await this.approveUSDC(offerAmount, useSeaport ? 'seaport' : 'nftexchange')
 
     // Make the offer
-    console.log('Making offer...')
-    const offerData = encodeNFTExchange.makeOffer(nftContract, tokenId, amountInUSDC, durationInSeconds)
-    const offerTx = await this.sendTransaction(userAddress, ADDRESSES.NFT_EXCHANGE, offerData)
-    console.log('Make offer tx:', offerTx)
-
-    return offerTx
+    const result = await adapter.makeOffer(
+      { contract: nftContract, tokenId, isERC721 },
+      offerAmount
+    )
+    
+    return result.hash
   }
 
   /**
    * Accept an offer
    */
-  async acceptOffer(offerId, nftContract, tokenId, isERC1155 = false) {
-    const userAddress = await this.getWalletAddress()
+  async acceptOffer(offer, nftContract, tokenId, isERC1155 = false) {
+    const { walletClient, publicClient, account } = await this.getViemClients()
+    const contractType = offer.contractType || 'nftexchange'
+    const adapter = getMarketplaceAdapter(contractType, walletClient, account, publicClient)
 
-    // Check NFT approval
-    const isApproved = await checkNFTApproval(nftContract, tokenId, userAddress, isERC1155)
-    
-    if (!isApproved) {
-      console.log('Approving NFT transfer for offer acceptance...')
-      let approveData
-      if (isERC1155) {
-        approveData = encodeERC1155.setApprovalForAll(ADDRESSES.NFT_EXCHANGE, true)
-      } else {
-        // For ERC721, approve only the specific token
-        approveData = encodeERC721.approve(ADDRESSES.NFT_EXCHANGE, tokenId)
-      }
-      
-      const approveTx = await this.sendTransaction(userAddress, nftContract, approveData)
-      console.log('NFT approval tx:', approveTx)
-      
-      // Wait for approval to be mined
-      await this.waitForTransaction(approveTx)
+    // Detect token standard if not provided
+    if (isERC1155 === false) {
+      const { detectTokenStandardCached } = await import('./token-standard.js')
+      const tokenStandard = await detectTokenStandardCached(nftContract, tokenId, publicClient, account)
+      isERC1155 = tokenStandard === 'ERC1155'
     }
 
-    // Accept the offer
-    console.log('Accepting offer...')
-    const acceptData = encodeNFTExchange.acceptOffer(offerId)
-    const acceptTx = await this.sendTransaction(userAddress, ADDRESSES.NFT_EXCHANGE, acceptData)
-    console.log('Accept offer tx:', acceptTx)
+    // For Seaport offers, we need to approve the NFT
+    if (contractType === 'seaport') {
+      const approvalTarget = CONDUIT_ADDRESS
+      let isApproved = false
+      
+      if (isERC1155) {
+        const approval = await publicClient.readContract({
+          address: nftContract,
+          abi: ERC1155_ABI,
+          functionName: 'isApprovedForAll',
+          args: [account, approvalTarget]
+        })
+        isApproved = approval
+      } else {
+        const approval = await publicClient.readContract({
+          address: nftContract,
+          abi: ERC721_ABI,
+          functionName: 'isApprovedForAll',
+          args: [account, approvalTarget]
+        })
+        isApproved = approval
+      }
 
-    return acceptTx
+      if (!isApproved) {
+        console.log('Approving NFT for Seaport conduit...')
+        let approveTx
+        
+        if (isERC1155) {
+          approveTx = await walletClient.writeContract({
+            address: nftContract,
+            abi: ERC1155_ABI,
+            functionName: 'setApprovalForAll',
+            args: [approvalTarget, true]
+          })
+        } else {
+          approveTx = await walletClient.writeContract({
+            address: nftContract,
+            abi: ERC721_ABI,
+            functionName: 'setApprovalForAll',
+            args: [approvalTarget, true]
+          })
+        }
+        
+        await this.waitForTransaction(approveTx)
+      }
+    } else {
+      // Original NFTExchange approval logic
+      const isApproved = await checkNFTApproval(nftContract, tokenId, account, isERC1155)
+      
+      if (!isApproved) {
+        let approveData
+        if (isERC1155) {
+          approveData = encodeERC1155.setApprovalForAll(ADDRESSES.NFT_EXCHANGE, true)
+        } else {
+          approveData = encodeERC721.approve(ADDRESSES.NFT_EXCHANGE, tokenId)
+        }
+        
+        const approveTx = await this.sendTransaction(account, nftContract, approveData)
+        await this.waitForTransaction(approveTx)
+      }
+    }
+
+    const result = await adapter.acceptOffer(offer.id || offer)
+    return result.hash
   }
 
   /**
    * Cancel an offer
    */
-  async cancelOffer(offerId) {
+  async cancelOffer(offerId, contractType = 'nftexchange') {
+    if (contractType === 'seaport') {
+      // Seaport uses cancelListing for offers too
+      return this.cancelListing(offerId, 'seaport')
+    }
+    
     const userAddress = await this.getWalletAddress()
     const cancelData = encodeNFTExchange.cancelOffer(offerId)
     return await this.sendTransaction(userAddress, ADDRESSES.NFT_EXCHANGE, cancelData)
