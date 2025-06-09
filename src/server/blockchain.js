@@ -783,25 +783,22 @@ export class BlockchainService {
     console.log('Processing Seaport OrdersMatched:', decodedEvent)
     const { orderHashes, transactionHash } = decodedEvent
 
-    // For each orderHash, it's likely an OrderFulfilled event was also emitted.
-    // If not, we might need to fetch transaction receipts to get more details for each matched order.
-    // For now, we assume OrderFulfilled events are processed separately.
-    // This handler could be used to link matched orders or trigger secondary checks.
+    // Check if orderHashes exists and is iterable
+    if (!orderHashes || !Array.isArray(orderHashes)) {
+      console.log('OrdersMatched event has no orderHashes array, skipping')
+      return
+    }
 
-    // Example: Record an activity for matching, or ensure each orderHash is processed.
+    // For each orderHash, check if it's in our database
     for (const orderHash of orderHashes) {
-      // Potentially, ensure this orderHash is marked as sold if an OrderFulfilled event was missed.
-      // However, relying on OrderFulfilled event is preferred.
-      console.log(`OrderMatched: ${orderHash} in tx ${transactionHash}. Ensure it is processed.`);
-
-      // Minimal activity logging for OrdersMatched if desired
-      // await db.recordActivity({
-      //   type: 'orders_matched_debug', // Custom type for debugging/tracking
-      //   actor_address: 'SeaportContract', // System event
-      //   metadata: JSON.stringify({ orderHash, matched_in_tx: transactionHash, contract_type: 'seaport' }),
-      //   tx_hash: transactionHash,
-      //   contract_type: 'seaport'
-      // });
+      const listing = await db.db.prepare("SELECT * FROM listings WHERE order_hash = ? AND contract_type = 'seaport'").bind(orderHash).first()
+      if (!listing) {
+        // Not our listing, skip silently
+        continue
+      }
+      
+      // If we find our listing, log it (OrderFulfilled should handle the actual sale)
+      console.log(`OrdersMatched includes our listing with orderHash: ${orderHash}`)
     }
   }
 

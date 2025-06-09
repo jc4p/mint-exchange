@@ -95,6 +95,7 @@ CREATE TABLE activity (
   price DECIMAL(36, 18),
   metadata TEXT, -- JSON metadata for additional context
   tx_hash VARCHAR(66), -- Transaction hash for this activity
+  contract_type TEXT CHECK(contract_type IN ('nft_exchange', 'seaport')) DEFAULT 'nft_exchange',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (actor_fid) REFERENCES users(fid)
 );

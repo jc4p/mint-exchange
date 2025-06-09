@@ -64,11 +64,15 @@ export class NFTExchangeAdapter extends MarketplaceAdapter {
   }
 
   async buyListing(listing) {
+    if (!listing.blockchainListingId) {
+      throw new Error('No blockchainListingId found in listing object')
+    }
+    
     const { request } = await this.publicClient.simulateContract({
       address: NFT_EXCHANGE_ADDRESS,
       abi: NFT_EXCHANGE_ABI,
       functionName: 'buyListing',
-      args: [BigInt(listing.listingId)],
+      args: [BigInt(listing.blockchainListingId)],
       account: this.account
     })
 
