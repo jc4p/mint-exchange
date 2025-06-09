@@ -67,26 +67,22 @@ seaport.post('/validate', async (c) => {
     let orderStatusFromContract;
     try {
       const rpcClient = createRpcClient(c.env);
-      // Seaport's getOrderStatus returns a tuple: (bool isValidated, bool isCancelled, uint totalFilled, uint totalSize)
-      // We need to interpret these. For simplicity, we'll just fetch them.
-      // Note: The Seaport ABI needs to be correctly imported and should contain `getOrderStatus`.
-      // The `SEAPORT_ABI` from `blockchain.js` is an array of event ABIs.
-      // We need the full Seaport contract ABI or at least the getOrderStatus function ABI here.
-      // For now, let's assume SEAPORT_ABI in blockchain.js is expanded or we have a specific one for calls.
-
-      // Placeholder: This requires the full Seaport ABI or at least the getOrderStatus function signature.
-      // The current SEAPORT_ABI in blockchain.js is only for events.
-      // This part will likely fail or needs adjustment based on the actual ABI available.
-      /*
+      
+      // Call Seaport's getOrderStatus function
       orderStatusFromContract = await rpcClient.readContract({
         address: seaportContractAddress,
-        abi: SEAPORT_ABI_FOR_CALLS, // This would be the full Seaport ABI
+        abi: SEAPORT_ABI,
         functionName: 'getOrderStatus',
         args: [orderHash],
       });
 
       const [isValidated, isCancelled, totalFilled, totalSize] = orderStatusFromContract;
-      if (isCancelled) {
+      
+      // First check if expired
+      const currentTime = Math.floor(Date.now() / 1000);
+      if (parseInt(orderParameters.endTime) < currentTime) {
+        onChainStatus = 'expired';
+      } else if (isCancelled) {
         onChainStatus = 'cancelled';
       } else if (totalFilled >= totalSize && totalSize > 0) { // totalSize might be 0 for some order types
         onChainStatus = 'filled';
@@ -95,17 +91,6 @@ seaport.post('/validate', async (c) => {
       } else {
         onChainStatus = 'not_validated'; // Not yet seen/validated by Seaport, or invalid parameters
       }
-      // Additional check for expiry based on orderParameters.endTime
-      const currentTime = Math.floor(Date.now() / 1000);
-      if (parseInt(orderParameters.endTime) < currentTime) {
-        onChainStatus = 'expired';
-      }
-      */
-      // For this subtask, we'll skip the direct on-chain call due to ABI complexity for now.
-      // The indexer will eventually update the status of orders it sees on-chain.
-      // A real validation endpoint would ideally perform this check.
-       onChainStatus = "on-chain_check_skipped";
-
 
     } catch (e) {
       console.error("Error checking on-chain order status:", e);
@@ -126,9 +111,3 @@ seaport.post('/validate', async (c) => {
 });
 
 export default seaport;
-
-// Replace `import { 거래 } from 'viem'` with actual import for recoverTypedDataAddress
-// At the top of the file, it should be:
-// import { recoverTypedDataAddress } from 'viem';
-// I used '거래' as a placeholder because the tool doesn't know the exact export name for viem.
-// I'll correct this in the next step if the tool doesn't do it automatically.

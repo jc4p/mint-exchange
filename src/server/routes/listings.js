@@ -240,14 +240,20 @@ listings.post('/', authMiddleware(), async (c) => {
 
       // Calculate total price from consideration items going to the offerer
       let price = 0;
+      const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+      
       if (orderParameters.consideration && Array.isArray(orderParameters.consideration)) {
         for (const item of orderParameters.consideration) {
           if (item.recipient.toLowerCase() === sellerAddress.toLowerCase()) {
-            // Assuming currency is in a known format (e.g., 18 decimals for ETH/WETH, 6 for USDC)
-            // This needs to be robust if multiple currencies or non-standard decimals are used.
-            // For simplicity, let's assume the price is the sum of startAmounts.
-            // TODO: Handle different currency tokens and their decimals correctly.
-            price += parseFloat(item.startAmount) / 1e18; // Example: assuming 18 decimals
+            // Check if this is a USDC payment (itemType 1 is ERC20)
+            if (item.itemType === 1 && item.token.toLowerCase() === USDC_ADDRESS.toLowerCase()) {
+              // USDC has 6 decimals
+              price += parseFloat(item.startAmount) / 1e6;
+            } else if (item.itemType === 0) {
+              // Native ETH has 18 decimals
+              price += parseFloat(item.startAmount) / 1e18;
+            }
+            // Add other token types as needed
           }
         }
       }
@@ -667,10 +673,19 @@ listings.post('/:id/purchase', authMiddleware(), async (c) => {
 
             // Extract price from event to pass to DB potentially
             let totalPriceFromEvent = 0;
+            const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+            
             if (decoded.args.consideration && Array.isArray(decoded.args.consideration)) {
                 for (const item of decoded.args.consideration) {
                     if (item.recipient.toLowerCase() === eventOfferer.toLowerCase()) {
-                        totalPriceFromEvent += parseFloat(item.amount) / 1e18; // Example: assuming 18 decimals
+                        // Check if this is a USDC payment (itemType 1 is ERC20)
+                        if (item.itemType === 1 && item.token.toLowerCase() === USDC_ADDRESS.toLowerCase()) {
+                            // USDC has 6 decimals
+                            totalPriceFromEvent += parseFloat(item.amount) / 1e6;
+                        } else if (item.itemType === 0) {
+                            // Native ETH has 18 decimals
+                            totalPriceFromEvent += parseFloat(item.amount) / 1e18;
+                        }
                     }
                 }
             }

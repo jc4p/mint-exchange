@@ -1,135 +1,33 @@
-import { encodeAbiParameters, keccak256 } from 'viem';
+import { Seaport } from '@opensea/seaport-js';
+import { ethers } from 'ethers';
 
-// Define the EIP-712 domain separator and order type hash for Seaport orders.
-// These values are standard for Seaport 1.1.
-// You might need to adjust if using a different Seaport version or custom domain.
+// Seaport configuration
 const SEAPORT_DOMAIN_NAME = "Seaport";
-const SEAPORT_DOMAIN_VERSION = "1.1";
-
-// Based on Seaport OrderComponents EIP-712 type definition
-// struct OrderComponents {
-//     address offerer;
-//     address zone;
-//     OrderItem[] offer;
-//     OrderItem[] consideration;
-//     uint8 orderType;
-//     uint256 startTime;
-//     uint256 endTime;
-//     bytes32 zoneHash;
-//     uint256 salt;
-//     bytes32 conduitKey;
-//     uint256 counter;
-// }
-// struct OrderItem {
-//     uint8 itemType;
-//     address token;
-//     uint256 identifierOrCriteria;
-//     uint256 startAmount;
-//     uint256 endAmount;
-// }
-// The EIP712 type string for OrderComponents
-const ORDER_COMPONENTS_EIP712_TYPE =
-  "OrderComponents(address offerer,address zone,OrderItem[] offer,OrderItem[] consideration,uint8 orderType,uint256 startTime,uint256 endTime,bytes32 zoneHash,uint256 salt,bytes32 conduitKey,uint256 counter)";
-const ORDER_ITEM_EIP712_TYPE =
-  "OrderItem(uint8 itemType,address token,uint256 identifierOrCriteria,uint256 startAmount,uint256 endAmount)";
-
-// Pre-calculate the type hashes
-const ORDER_COMPONENTS_TYPE_HASH = keccak256(Buffer.from(ORDER_COMPONENTS_EIP712_TYPE, 'utf-8'));
-const ORDER_ITEM_TYPE_HASH = keccak256(Buffer.from(ORDER_ITEM_EIP712_TYPE, 'utf-8'));
-
-
-function hashOrderComponents(orderComponents) {
-  // Helper to hash an array of OrderItems
-  const hashOrderItems = (items) => {
-    if (!items || items.length === 0) {
-      return keccak256(Buffer.from('', 'utf-8')); // Or specific hash for empty array if defined by Seaport
-    }
-    const encodedItems = items.map(item => hashOrderItem(item));
-    return keccak256(encodePacked(Array(items.length).fill('bytes32'), encodedItems));
-  };
-
-  // Helper to hash a single OrderItem
-  const hashOrderItem = (item) => {
-    return keccak256(
-      encodeAbiParameters(
-        [
-          { type: 'bytes32' },      // typeHash for OrderItem
-          { type: 'uint8' },       // itemType
-          { type: 'address' },     // token
-          { type: 'uint256' },     // identifierOrCriteria
-          { type: 'uint256' },     // startAmount
-          { type: 'uint256' }      // endAmount
-        ],
-        [
-          ORDER_ITEM_TYPE_HASH,
-          item.itemType,
-          item.token,
-          item.identifierOrCriteria, // Ensure this is correctly named (or identifier for non-criteria)
-          item.startAmount,
-          item.endAmount
-        ]
-      )
-    );
-  };
-
-  return keccak256(
-    encodeAbiParameters(
-      [
-        { type: 'bytes32' },   // typeHash for OrderComponents
-        { type: 'address' },   // offerer
-        { type: 'address' },   // zone
-        { type: 'bytes32' },   // offer hash
-        { type: 'bytes32' },   // consideration hash
-        { type: 'uint8' },     // orderType
-        { type: 'uint256' },   // startTime
-        { type: 'uint256' },   // endTime
-        { type: 'bytes32' },   // zoneHash
-        { type: 'uint256' },   // salt
-        { type: 'bytes32' },   // conduitKey
-        { type: 'uint256' }    // counter
-      ],
-      [
-        ORDER_COMPONENTS_TYPE_HASH,
-        orderComponents.offerer,
-        orderComponents.zone,
-        hashOrderItems(orderComponents.offer),
-        hashOrderItems(orderComponents.consideration),
-        orderComponents.orderType,
-        orderComponents.startTime,
-        orderComponents.endTime,
-        orderComponents.zoneHash,
-        orderComponents.salt,
-        orderComponents.conduitKey,
-        orderComponents.counter
-      ]
-    )
-  );
-}
-
+const SEAPORT_DOMAIN_VERSION = "1.6";
 
 /**
- * Calculates the Seaport order hash.
+ * Calculates the Seaport order hash using the Seaport SDK
  * @param {object} orderParameters The Seaport order parameters (OrderComponents).
- * @param {string} seaportAddress The address of the Seaport contract.
- * @param {number} chainId The chain ID.
  * @returns {string} The order hash.
  */
-export function getOrderHash(orderParameters, seaportAddress, chainId) {
+export function getOrderHash(orderParameters) {
   if (!orderParameters || typeof orderParameters !== 'object') {
     throw new Error('Invalid orderParameters provided for hashing.');
   }
-  if (!seaportAddress || !chainId) {
-    // These are not directly part of the order hash itself but the EIP-712 domain.
-    // However, Seaport's getOrderHash function on-chain does not use domain separator.
-    // It hashes the OrderComponents struct directly.
-    // The domain separator is used for signing, not for getOrderHash.
-    // Let's clarify if the caller expects EIP-712 struct hash or `_deriveOrderHash`
-  }
 
-  // Seaport's `getOrderHash` is a hash of the `OrderComponents` struct.
-  // It does NOT involve the EIP-712 domain separator.
-  // The EIP-712 domain separator is used when signing the order.
-  return hashOrderComponents(orderParameters);
+  // Create a minimal provider for Seaport SDK (just for hashing, no RPC needed)
+  const provider = new ethers.JsonRpcProvider();
+  
+  // Create Seaport instance
+  const seaport = new Seaport(provider, {
+    overrides: {
+      // We don't need a specific contract address for just hashing
+      contractAddress: ethers.ZeroAddress
+    }
+  });
+
+  // Use Seaport SDK's getOrderHash method
+  return seaport.getOrderHash(orderParameters);
 }
 
 // Example Usage (for testing or reference):

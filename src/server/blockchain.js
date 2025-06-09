@@ -20,14 +20,14 @@ const NFT_EXCHANGE_EVENTS = parseAbi([
   'event FeeRecipientUpdated(address oldRecipient, address newRecipient)'
 ])
 
-// Seaport ABI - focusing on key events for sales and cancellations
-// This is a simplified version. A more complete ABI might be needed for full Seaport interaction.
-const SEAPORT_ABI = parseAbi([
+// Seaport ABI - focusing on key events and functions
+export const SEAPORT_ABI = parseAbi([
+  // Events
   'event OrderFulfilled(bytes32 orderHash, address indexed offerer, address indexed zone, address recipient, (uint8 itemType, address token, uint256 identifier, uint256 amount)[] offer, (uint8 itemType, address token, uint256 identifier, uint256 amount, address recipient)[] consideration)',
   'event OrderCancelled(bytes32 orderHash, address indexed offerer, address indexed zone)',
-  'event OrdersMatched(bytes32[] orderHashes)'
-  // TODO: Consider adding OrderValidated if needed:
-  // 'event OrderValidated(bytes32 orderHash, address indexed offerer, address indexed zone)'
+  'event OrdersMatched(bytes32[] orderHashes)',
+  // Functions
+  'function getOrderStatus(bytes32 orderHash) view returns (bool isValidated, bool isCancelled, uint256 totalFilled, uint256 totalSize)'
 ])
 
 // TODO: Define Seaport event topics/signatures if needed for direct filtering,
@@ -702,6 +702,120 @@ export class BlockchainService {
   }
 
   /**
+   * Decode Seaport OrderFulfilled event log
+   */
+  decodeSeaportOrderFulfilled(log) {
+    try {
+      const decoded = decodeEventLog({
+        abi: SEAPORT_ABI,
+        data: log.data,
+        topics: log.topics,
+        eventName: 'OrderFulfilled',
+        strict: false
+      })
+      if (!decoded || !decoded.args) return null
+
+      const { orderHash, offerer, zone, recipient, offer, consideration } = decoded.args
+      return {
+        eventName: decoded.eventName,
+        orderHash,
+        offerer,
+        zone,
+        recipient,
+        offer,
+        consideration,
+        blockNumber: Number(log.blockNumber),
+        transactionHash: log.transactionHash,
+        logIndex: log.logIndex,
+        log: log
+      }
+    } catch (error) {
+      if (!error.message?.includes('event "OrderFulfilled" not found on ABI') && !error.message?.includes('data is required')) {
+        console.error('Error decoding Seaport OrderFulfilled event:', error, log)
+      }
+      return null
+    }
+  }
+
+  /**
+   * Process Seaport OrderFulfilled event
+   */
+  async processSeaportOrderFulfilled(decodedEvent, db) {
+    if (!decodedEvent) return
+
+    console.log('Processing Seaport OrderFulfilled:', decodedEvent)
+    const { orderHash, offerer, recipient, offer, consideration, transactionHash } = decodedEvent
+
+    // Determine if this is a sale (NFT transferred from offerer) or purchase
+    const nftItem = offer.find(item => item.itemType === 2 || item.itemType === 3) // ERC721 or ERC1155
+    
+    if (nftItem) {
+      // This is a sale - the offerer is selling an NFT
+      const USDC_ADDRESS = this.env.USDC_ADDRESS || '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+      
+      // Calculate total price from consideration items
+      let totalPrice = 0
+      for (const item of consideration) {
+        if (item.itemType === 1 && item.token.toLowerCase() === USDC_ADDRESS.toLowerCase() && 
+            item.recipient.toLowerCase() === offerer.toLowerCase()) {
+          totalPrice += Number(item.amount) / 1e6 // USDC has 6 decimals
+        }
+      }
+
+      // Find buyer address - the one who receives the NFT (not necessarily recipient)
+      // In a direct sale, recipient might be the buyer, but in complex orders it could be different
+      const buyerAddress = recipient
+
+      // Resolve buyer FID
+      let buyerFid = null
+      if (this.neynar) {
+        const users = await this.neynar.fetchUsersByAddress(buyerAddress)
+        if (users.length > 0) {
+          buyerFid = users[0].fid
+          
+          // Ensure user exists in our database
+          const existingUser = await db.getUser(buyerFid)
+          if (!existingUser) {
+            await db.createOrUpdateUser({
+              fid: buyerFid,
+              username: users[0].username,
+              display_name: users[0].display_name,
+              pfp_url: users[0].pfp_url
+            })
+          }
+        }
+      }
+
+      // Mark the listing as sold
+      await db.markSeaportListingSoldByOrderHash({
+        orderHash,
+        buyerAddress,
+        buyerFid,
+        saleTxHash: transactionHash,
+        contractType: 'seaport',
+        totalPriceFromEvent: totalPrice
+      })
+
+      // Record activity
+      await db.recordActivity({
+        type: 'sale',
+        actor_fid: buyerFid,
+        actor_address: buyerAddress,
+        nft_contract: nftItem.token,
+        token_id: nftItem.identifier,
+        price: totalPrice,
+        metadata: JSON.stringify({ 
+          order_hash: orderHash,
+          seller_address: offerer,
+          contract_type: 'seaport'
+        }),
+        tx_hash: transactionHash,
+        contract_type: 'seaport'
+      })
+    }
+  }
+
+  /**
    * Decode Seaport OrderCancelled event log
    */
   decodeSeaportOrderCancelled(log) {
@@ -743,9 +857,7 @@ export class BlockchainService {
     console.log('Processing Seaport OrderCancelled:', decodedEvent)
     const { orderHash, cancellerAddress, transactionHash } = decodedEvent
 
-    // TODO: Implement db.cancelSeaportListingByOrderHash
-    // This function would find the listing by orderHash, verify cancellerAddress matches seller_address,
-    // and set cancelled_at, cancel_tx_hash. It should ensure contract_type is 'seaport'.
+    // Cancel the Seaport listing
     const cancelData = {
         orderHash,
         cancellerAddress,
@@ -753,7 +865,7 @@ export class BlockchainService {
         contractType: 'seaport'
     }
     console.log('Calling db.cancelSeaportListingByOrderHash with:', cancelData)
-    // await db.cancelSeaportListingByOrderHash(cancelData);
+    await db.cancelSeaportListingByOrderHash(cancelData);
 
     // Record 'listing_cancelled' activity
     // Need to fetch listing details (NFT contract, token ID, seller FID) for activity recording
