@@ -2,6 +2,7 @@ import { BaseElement } from './base-element.js'
 import { EVENTS } from '../utils/events.js'
 import { transactionManager } from '../utils/transactions.js'
 import { showAlert, showSuccess } from './modal.js'
+import { detectTokenStandardCached } from '../utils/token-standard.js'
 
 export class CreateListing extends BaseElement {
   constructor() {
@@ -70,6 +71,18 @@ export class CreateListing extends BaseElement {
       // Check network first
       await transactionManager.checkNetwork()
       
+      // Detect token standard for proxy contract compatibility
+      console.log('Detecting NFT token standard...')
+      const { publicClient } = await transactionManager.getViemClients()
+      const tokenStandard = await detectTokenStandardCached(
+        nft.contract.address,
+        nft.tokenId,
+        publicClient,
+        await transactionManager.getWalletAddress()
+      )
+      const isERC1155 = tokenStandard === 'ERC1155'
+      console.log(`NFT is ${tokenStandard}`)
+      
       // Create listing on blockchain
       console.log('Creating listing on blockchain using Seaport...')
       const result = await transactionManager.createListing(
@@ -77,7 +90,7 @@ export class CreateListing extends BaseElement {
         nft.tokenId,
         parseFloat(price),
         expiryDays,
-        false, // Assuming ERC721 for now, can be enhanced to detect standard
+        isERC1155,
         true   // Always use Seaport for new listings
       )
       

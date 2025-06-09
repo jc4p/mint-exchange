@@ -2,6 +2,7 @@ import { BaseElement } from './base-element.js'
 import { EVENTS } from '../utils/events.js'
 import { transactionManager } from '../utils/transactions.js'
 import { showAlert, showConfirm } from './modal.js'
+import { detectTokenStandardCached } from '../utils/token-standard.js'
 
 export class ListingDetails extends BaseElement {
   constructor() {

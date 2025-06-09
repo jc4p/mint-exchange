@@ -333,12 +333,17 @@ export class TransactionManager {
       throw new Error(`Insufficient USDC balance. You have ${Number(balance) / 1e6} USDC, need ${offerAmount} USDC`)
     }
 
+    // Detect token standard for proxy contract compatibility
+    const { detectTokenStandardCached } = await import('./token-standard.js')
+    const tokenStandard = await detectTokenStandardCached(nftContract, tokenId, publicClient)
+    const isERC721 = tokenStandard === 'ERC721'
+
     // Approve USDC for the appropriate contract
     await this.approveUSDC(offerAmount, useSeaport ? 'seaport' : 'nftexchange')
 
     // Make the offer
     const result = await adapter.makeOffer(
-      { contract: nftContract, tokenId },
+      { contract: nftContract, tokenId, isERC721 },
       offerAmount
     )
     
@@ -352,6 +357,13 @@ export class TransactionManager {
     const { walletClient, publicClient, account } = await this.getViemClients()
     const contractType = offer.contractType || 'nftexchange'
     const adapter = getMarketplaceAdapter(contractType, walletClient, account, publicClient)
+
+    // Detect token standard if not provided
+    if (isERC1155 === false) {
+      const { detectTokenStandardCached } = await import('./token-standard.js')
+      const tokenStandard = await detectTokenStandardCached(nftContract, tokenId, publicClient, account)
+      isERC1155 = tokenStandard === 'ERC1155'
+    }
 
     // For Seaport offers, we need to approve the NFT
     if (contractType === 'seaport') {
