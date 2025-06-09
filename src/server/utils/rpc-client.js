@@ -50,7 +50,7 @@ export async function waitForAndGetTransaction(client, hash, maxAttempts = 10, d
  * Wait for a transaction receipt to be available and get it
  * Retries up to maxAttempts times with a delay between attempts
  */
-export async function waitForAndGetTransactionReceipt(client, hash, maxAttempts = 10, delayMs = 200) {
+export async function waitForAndGetTransactionReceipt(client, hash, maxAttempts = 25, delayMs = 400) {
   console.log(`Waiting for transaction receipt ${hash} to be available...`)
   
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {

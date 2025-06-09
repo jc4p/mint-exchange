@@ -7,12 +7,16 @@ const listings = new Hono()
 
 // Get current user's listings (protected - uses JWT)
 listings.get('/me', authMiddleware(), async (c) => {
+  console.log('=== GET /api/listings/me ===')
   try {
     const db = new Database(c.env.DB)
     const user = c.get('user')
+    console.log('User from JWT:', { fid: user.fid, username: user.username })
+    
     const page = parseInt(c.req.query('page') || '1')
     const limit = parseInt(c.req.query('limit') || '20')
     const sort = c.req.query('sort') || 'recent'
+    console.log('Query params:', { page, limit, sort })
     
     const result = await db.getActiveListings({ 
       page, 
@@ -20,6 +24,10 @@ listings.get('/me', authMiddleware(), async (c) => {
       sort, 
       sellerFid: user.fid, 
       search: null 
+    })
+    console.log('Database result:', { 
+      listingCount: result.listings.length, 
+      pagination: result.pagination 
     })
     
     // Transform data to match frontend expectations
@@ -49,13 +57,15 @@ listings.get('/me', authMiddleware(), async (c) => {
       pagination: result.pagination
     })
   } catch (error) {
-    console.error('Error fetching user listings:', error)
+    console.error('❌ Error fetching user listings:', error)
+    console.error('Stack trace:', error.stack)
     return c.json({ error: 'Failed to fetch your listings' }, 500)
   }
 })
 
 // Get all active listings
 listings.get('/', async (c) => {
+  console.log('=== GET /api/listings ===')
   try {
     const db = new Database(c.env.DB)
     const page = parseInt(c.req.query('page') || '1')
@@ -65,7 +75,13 @@ listings.get('/', async (c) => {
     const search = c.req.query('search')
     const contractType = c.req.query('contract_type') // Added contract_type
     
+    console.log('Query params:', { page, limit, sort, sellerFid, search, contractType })
+    
     const result = await db.getActiveListings({ page, limit, sort, sellerFid, search, contractType })
+    console.log('Database query result:', {
+      listingCount: result.listings.length,
+      pagination: result.pagination
+    })
     
     // Transform data to match frontend expectations
     const transformedListings = result.listings.map(listing => {
@@ -91,6 +107,11 @@ listings.get('/', async (c) => {
       };
 
       if (listing.contract_type === 'seaport') {
+        console.log(`Seaport listing ${listing.id}:`, {
+          orderHash: listing.order_hash,
+          hasOrderParameters: !!listing.order_parameters,
+          zoneAddress: listing.zone_address
+        });
         return {
           ...baseListing,
           orderHash: listing.order_hash,
@@ -110,11 +131,12 @@ listings.get('/', async (c) => {
       pagination: result.pagination
     })
   } catch (error) {
-    console.error('Error fetching listings:', error)
+    console.error('❌ Error fetching listings:', error)
+    console.error('Stack trace:', error.stack)
     
     // Fallback to mock data if database is not available
     if (error.message?.includes('D1_ERROR') || !c.env.DB) {
-      console.log('Falling back to mock data')
+      console.log('⚠️ Falling back to mock data')
       const page = parseInt(c.req.query('page') || '1')
       const limit = parseInt(c.req.query('limit') || '20')
       

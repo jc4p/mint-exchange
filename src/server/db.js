@@ -328,8 +328,8 @@ export class Database {
       .first()
 
     if (!listing) {
-      console.error(`Seaport listing with orderHash ${orderHash} not found.`)
-      throw new Error(`Listing with orderHash ${orderHash} not found or not a Seaport listing.`)
+      // Silently return if listing not found (it's not ours)
+      return { changes: 0, message: 'Listing not found.' }
     }
 
     if (listing.sold_at) {
@@ -376,8 +376,8 @@ export class Database {
       .first()
 
     if (!listing) {
-      console.error(`Seaport listing with orderHash ${orderHash} not found.`)
-      throw new Error(`Listing with orderHash ${orderHash} not found or not a Seaport listing.`)
+      // Silently return if listing not found (it's not ours)
+      return { changes: 0, message: 'Listing not found.' }
     }
     if (listing.sold_at) {
       console.warn(`Seaport listing with orderHash ${orderHash} is already sold. Cannot cancel.`)

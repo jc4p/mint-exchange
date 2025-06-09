@@ -585,8 +585,14 @@ export class BlockchainService {
   async processSeaportOrderFulfilled(decodedEvent, db) {
     if (!decodedEvent) return
 
-    console.log('Processing Seaport OrderFulfilled:', decodedEvent)
     const { orderHash, offerer, recipient, offer, consideration, transactionHash } = decodedEvent
+
+    // First check if this orderHash exists in our database
+    const listing = await db.db.prepare("SELECT * FROM listings WHERE order_hash = ? AND contract_type = 'seaport'").bind(orderHash).first()
+    if (!listing) {
+      // This is not our listing, ignore it silently
+      return
+    }
 
     // Determine if this is a sale (NFT transferred from offerer) or purchase
     const nftItem = offer.find(item => item.itemType === 2 || item.itemType === 3) // ERC721 or ERC1155
@@ -696,8 +702,14 @@ export class BlockchainService {
   async processSeaportOrderCancelled(decodedEvent, db) {
     if (!decodedEvent) return
 
-    console.log('Processing Seaport OrderCancelled:', decodedEvent)
     const { orderHash, cancellerAddress, transactionHash } = decodedEvent
+
+    // First check if this orderHash exists in our database
+    const listing = await db.db.prepare("SELECT * FROM listings WHERE order_hash = ? AND contract_type = 'seaport'").bind(orderHash).first()
+    if (!listing) {
+      // This is not our listing, ignore it silently
+      return
+    }
 
     // Cancel the Seaport listing
     const cancelData = {
@@ -706,12 +718,9 @@ export class BlockchainService {
         cancelTxHash: transactionHash,
         contractType: 'seaport'
     }
-    console.log('Calling db.cancelSeaportListingByOrderHash with:', cancelData)
     await db.cancelSeaportListingByOrderHash(cancelData);
 
     // Record 'listing_cancelled' activity
-    // Need to fetch listing details (NFT contract, token ID, seller FID) for activity recording
-    const listing = await db.db.prepare("SELECT nft_contract, token_id, seller_fid, price FROM listings WHERE order_hash = ?").bind(orderHash).first();
     if (listing) {
       await db.recordActivity({
         type: 'listing_cancelled',
