@@ -16,5 +16,5 @@ ALTER TABLE listings ADD COLUMN counter INTEGER;
 -- Admin should ensure these are run only if needed or manage index creation separately.
 -- A more robust migration system would handle conditional index creation.
 
--- CREATE INDEX idx_listings_contract_type ON listings(contract_type);
--- CREATE INDEX idx_listings_order_hash ON listings(order_hash) WHERE order_hash IS NOT NULL;
+CREATE INDEX idx_listings_contract_type ON listings(contract_type);
+CREATE INDEX idx_listings_order_hash ON listings(order_hash) WHERE order_hash IS NOT NULL;
