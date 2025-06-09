@@ -71,13 +71,14 @@ export class CreateListing extends BaseElement {
       await transactionManager.checkNetwork()
       
       // Create listing on blockchain
-      console.log('Creating listing on blockchain...')
+      console.log('Creating listing on blockchain using Seaport...')
       const txHash = await transactionManager.createListing(
         nft.contract.address,
         nft.tokenId,
         parseFloat(price),
         expiryDays,
-        false // Assuming ERC721 for now, can be enhanced to detect standard
+        false, // Assuming ERC721 for now, can be enhanced to detect standard
+        true   // Always use Seaport for new listings
       )
       
       console.log('Transaction submitted:', txHash)
@@ -98,6 +99,7 @@ export class CreateListing extends BaseElement {
           tokenId: nft.tokenId,
           price: price,
           expiry: expiryDate.toISOString(),
+          contractType: 'seaport', // Always Seaport for new listings
           metadata: {
             name: nft.title,
             description: nft.description,
@@ -438,7 +440,7 @@ export class CreateListing extends BaseElement {
                   />
                   <span class="price-suffix">USDC</span>
                 </div>
-                <p class="fee-notice">A 1% platform fee will be charged on purchase</p>
+                <p class="fee-notice">A 1% platform fee will be added to the buyer's total</p>
                 ${error ? `<p class="error-message">${error}</p>` : ''}
               </div>
               
