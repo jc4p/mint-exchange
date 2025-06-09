@@ -20,6 +20,22 @@ const NFT_EXCHANGE_EVENTS = parseAbi([
   'event FeeRecipientUpdated(address oldRecipient, address newRecipient)'
 ])
 
+// Seaport ABI - focusing on key events for sales and cancellations
+// This is a simplified version. A more complete ABI might be needed for full Seaport interaction.
+const SEAPORT_ABI = parseAbi([
+  'event OrderFulfilled(bytes32 orderHash, address indexed offerer, address indexed zone, address recipient, (uint8 itemType, address token, uint256 identifier, uint256 amount)[] offer, (uint8 itemType, address token, uint256 identifier, uint256 amount, address recipient)[] consideration)',
+  'event OrderCancelled(bytes32 orderHash, address indexed offerer, address indexed zone)',
+  'event OrdersMatched(bytes32[] orderHashes)'
+  // TODO: Consider adding OrderValidated if needed:
+  // 'event OrderValidated(bytes32 orderHash, address indexed offerer, address indexed zone)'
+])
+
+// TODO: Define Seaport event topics/signatures if needed for direct filtering,
+// or rely on viem's decodeEventLog with the SEAPORT_ABI.
+// For example:
+// const SEAPORT_ORDER_FULFILLED_TOPIC = keccak256(toSignature(SEAPORT_ABI.find(e => e.name === 'OrderFulfilled')));
+
+
 export class BlockchainService {
   constructor(env) {
     this.env = env
@@ -355,26 +371,79 @@ export class BlockchainService {
    * Decode and process a single log
    */
   async decodeAndProcessLog(log, db) {
-    try {
-      const decoded = decodeEventLog({
-        abi: NFT_EXCHANGE_EVENTS,
-        data: log.data,
-        topics: log.topics
-      })
-      
-      const event = {
-        eventName: decoded.eventName,
-        args: decoded.args,
-        blockNumber: Number(log.blockNumber),
-        transactionHash: log.transactionHash,
-        logIndex: log.logIndex
-      }
+    let decodedEvent = null;
+    let eventAbiType = null; // 'NFT_EXCHANGE' or 'SEAPORT'
 
-      await this.processEvent(event, db)
-      return event
-    } catch (error) {
-      console.error('Failed to decode log:', error)
-      return null
+    // Check log address and attempt to decode with the appropriate ABI
+    if (this.env.CONTRACT_ADDRESS && log.address.toLowerCase() === this.env.CONTRACT_ADDRESS.toLowerCase()) {
+      try {
+        const decodedNftExchange = decodeEventLog({
+          abi: NFT_EXCHANGE_EVENTS,
+          data: log.data,
+          topics: log.topics,
+          strict: false // Do not throw if event not found
+        });
+        if (decodedNftExchange && decodedNftExchange.eventName) {
+          decodedEvent = {
+            eventName: decodedNftExchange.eventName,
+            args: decodedNftExchange.args,
+            blockNumber: Number(log.blockNumber),
+            transactionHash: log.transactionHash,
+            logIndex: log.logIndex
+          };
+          eventAbiType = 'NFT_EXCHANGE';
+        }
+      } catch (e) {
+        // console.warn('Failed to decode with NFT_EXCHANGE_EVENTS, might be different contract or unknown event:', log, e.message);
+      }
+    } else if (this.env.SEAPORT_CONTRACT_ADDRESS && log.address.toLowerCase() === this.env.SEAPORT_CONTRACT_ADDRESS.toLowerCase()) {
+      const seaportOrderFulfilled = this.decodeSeaportOrderFulfilled(log); // This already returns a structured event or null
+      if (seaportOrderFulfilled) {
+        decodedEvent = seaportOrderFulfilled; // Already includes eventName, args, blockNumber etc.
+        eventAbiType = 'SEAPORT';
+      } else {
+        const seaportOrderCancelled = this.decodeSeaportOrderCancelled(log);
+        if (seaportOrderCancelled) {
+          decodedEvent = seaportOrderCancelled;
+          eventAbiType = 'SEAPORT';
+        } else {
+          const seaportOrdersMatched = this.decodeSeaportOrdersMatched(log);
+          if (seaportOrdersMatched) {
+            decodedEvent = seaportOrdersMatched;
+            eventAbiType = 'SEAPORT';
+          }
+        }
+      }
+    } else {
+      // Log from an unknown contract address
+      // console.log('Log from unknown contract address:', log.address);
+      return null;
+    }
+
+
+    if (decodedEvent && eventAbiType === 'NFT_EXCHANGE') {
+      await this.processEvent(decodedEvent, db); // Existing handler for NFT Exchange
+      return decodedEvent;
+    } else if (decodedEvent && eventAbiType === 'SEAPORT') {
+      switch (decodedEvent.eventName) {
+        case 'OrderFulfilled':
+          await this.processSeaportOrderFulfilled(decodedEvent, db);
+          break;
+        case 'OrderCancelled':
+          await this.processSeaportOrderCancelled(decodedEvent, db);
+          break;
+        case 'OrdersMatched':
+          await this.processSeaportOrdersMatched(decodedEvent, db);
+          break;
+        default:
+          console.log('Unhandled Seaport event:', decodedEvent.eventName, decodedEvent);
+      }
+      return decodedEvent;
+    } else {
+      // If strict: false is used in individual decoders, this path might not be hit often
+      // unless it's an event not present in any ABI for a known contract.
+      // console.log('Log did not match known ABIs or event not found:', log);
+      return null;
     }
   }
 
@@ -410,16 +479,444 @@ export class BlockchainService {
    * Process all events from a range of blocks
    */
   async processEvents(fromBlock, toBlock, db) {
-    const events = await this.getContractEvents(fromBlock, toBlock)
-    
-    // console.log(`Processing ${events.length} events from blocks ${fromBlock} to ${toBlock}`)
+    let allLogs = [];
+    const fromBlockBigInt = BigInt(fromBlock);
+    const toBlockBigInt = BigInt(toBlock);
 
-    for (const event of events) {
+    // Fetch logs for NFTExchange contract
+    if (this.env.CONTRACT_ADDRESS) {
       try {
-        await this.processEvent(event, db)
+        const nftExchangeLogs = await this.client.getLogs({
+          address: this.env.CONTRACT_ADDRESS, // Already a string, no need for .toLowerCase() here
+          fromBlock: fromBlockBigInt,
+          toBlock: toBlockBigInt
+        });
+        if (nftExchangeLogs) {
+          allLogs = allLogs.concat(nftExchangeLogs.map(log => ({ ...log, _sourceContract: 'NFTExchange' })));
+        }
+        // console.log(`Fetched ${nftExchangeLogs ? nftExchangeLogs.length : 0} logs for NFTExchange from ${fromBlock}-${toBlock}`);
       } catch (error) {
-        console.error(`Error processing event ${event.eventName}:`, error)
+        console.error(`Error fetching NFTExchange logs for blocks ${fromBlock}-${toBlock}:`, error);
       }
+    }
+
+    // Fetch logs for Seaport contract
+    if (this.env.SEAPORT_CONTRACT_ADDRESS) {
+      try {
+        const seaportLogs = await this.client.getLogs({
+          address: this.env.SEAPORT_CONTRACT_ADDRESS, // Already a string
+          // No specific `events` topics needed here, decodeAndProcessLog will handle it by address
+          fromBlock: fromBlockBigInt,
+          toBlock: toBlockBigInt
+        });
+        if (seaportLogs) {
+          allLogs = allLogs.concat(seaportLogs.map(log => ({ ...log, _sourceContract: 'Seaport' })));
+        }
+        // console.log(`Fetched ${seaportLogs ? seaportLogs.length : 0} logs for Seaport from ${fromBlock}-${toBlock}`);
+      } catch (error) {
+        console.error(`Error fetching Seaport logs for blocks ${fromBlock}-${toBlock}:`, error);
+      }
+    }
+    
+    if (allLogs.length === 0) {
+      // console.log(`No logs found from any contract for blocks ${fromBlock} to ${toBlock}`);
+      return;
+    }
+
+    // Sort all logs by blockNumber and then logIndex to ensure chronological processing
+    allLogs.sort((a, b) => {
+      if (BigInt(a.blockNumber) === BigInt(b.blockNumber)) {
+        return a.logIndex - b.logIndex;
+      }
+      return Number(BigInt(a.blockNumber) - BigInt(b.blockNumber)); // Convert subtraction to Number for sort
+    });
+
+    // console.log(`Processing ${allLogs.length} total sorted logs from blocks ${fromBlock} to ${toBlock}`);
+
+    for (const log of allLogs) {
+      try {
+        // decodeAndProcessLog will use log.address to determine how to decode
+        await this.decodeAndProcessLog(log, db);
+      } catch (error) {
+        // Log individual log processing errors and continue with the next log
+        console.error(`Error processing log (tx: ${log.transactionHash}, index: ${log.logIndex}, source: ${log._sourceContract}):`, error);
+      }
+    }
+  }
+
+  /**
+   * Decode Seaport OrderFulfilled event log
+   */
+  decodeSeaportOrderFulfilled(log) {
+    try {
+      const decoded = decodeEventLog({
+        abi: SEAPORT_ABI,
+        data: log.data,
+        topics: log.topics,
+        eventName: 'OrderFulfilled',
+        strict: false
+      })
+
+      if (!decoded || !decoded.args) return null
+
+      const { orderHash, offerer, recipient, offer, consideration } = decoded.args
+
+      let nftContract, tokenId, itemType
+      // Find the NFT in the offer items (ERC721 or ERC1155)
+      const nftOfferItem = offer.find(item => item.itemType === 2 /* ERC721 */ || item.itemType === 3 /* ERC1155 */)
+      if (nftOfferItem) {
+        nftContract = nftOfferItem.token
+        tokenId = nftOfferItem.identifier.toString()
+        itemType = nftOfferItem.itemType
+      } else {
+        // If no direct NFT found in offer, it might be a more complex swap.
+        // For now, we require a clear NFT in the offer for our marketplace context.
+        console.warn('OrderFulfilled: No clear NFT (ERC721/1155) found in offer items.', log)
+        return null
+      }
+
+      let totalPrice = BigInt(0)
+      let buyerAddress = recipient // Default buyer to overall recipient, might be refined by consideration items
+
+      // Calculate total price paid to the seller (offerer) and identify actual buyer from consideration
+      // Seaport consideration can be complex: item recipient can be different from overall tx recipient
+      for (const item of consideration) {
+        // Sum up amounts of known currency tokens (e.g., ETH, WETH, USDC) going to the offerer
+        // This is a simplified assumption; real Seaport orders can have many permutations.
+        // We assume the primary payment token is what the offerer receives.
+        if (item.recipient.toLowerCase() === offerer.toLowerCase()) {
+           // TODO: Add check for item.token (e.g. if it's ETH or USDC) to sum correctly.
+           // For now, summing all amounts going to offerer.
+          totalPrice += BigInt(item.amount)
+        }
+
+        // Attempt to find the "buyer" - often the one spending the primary currency.
+        // This is heuristic. If an item is NOT going to the offerer, its spender might be the buyer.
+        // The overall `recipient` of OrderFulfilled is often the marketplace or a contract.
+        if (item.recipient.toLowerCase() !== offerer.toLowerCase() && item.itemType < 2 /* i.e. currency, not NFT */) {
+            // This logic is very simplified. A robust solution needs to check spender of the log.
+            // However, `spender` is not part of OrderFulfilled event args.
+            // Relying on `log.address` (Seaport contract) and `offerer`.
+            // The actual buyer might be the `msg.sender` to the Seaport contract call.
+            // For now, if consideration items are not going to offerer, one of them might be the buyer's payment.
+            // A more reliable way is to get transaction sender from transaction receipt if needed.
+        }
+      }
+
+      // If no specific consideration item clearly identifies buyer's payment to seller,
+      // and overall recipient is not the seller, it could be the buyer.
+      // This is often the case for direct fills.
+      if (recipient.toLowerCase() !== offerer.toLowerCase() && recipient.toLowerCase() !== '0x0000000000000000000000000000000000000000') {
+        // buyerAddress is already recipient by default
+      }
+
+
+      return {
+        eventName: decoded.eventName,
+        orderHash,
+        sellerAddress: offerer,
+        buyerAddress: buyerAddress, // This is a best guess; may need refinement
+        nftContract,
+        tokenId,
+        itemType, // 2 for ERC721, 3 for ERC1155
+        totalPrice: totalPrice.toString(), // Convert BigInt to string
+        offerItems: offer, // For more detailed inspection if needed
+        considerationItems: consideration, // For more detailed inspection
+        blockNumber: Number(log.blockNumber),
+        transactionHash: log.transactionHash,
+        logIndex: log.logIndex,
+        log: log // Keep original log for further details if needed
+      }
+    } catch (error) {
+      // Log error if it's not an "event not found" error, which is expected if log is not OrderFulfilled
+      if (!error.message?.includes('event "OrderFulfilled" not found on ABI') && !error.message?.includes('data is required')) {
+        console.error('Error decoding Seaport OrderFulfilled event:', error, log)
+      }
+      return null
+    }
+  }
+
+  /**
+   * Process Seaport OrderFulfilled event
+   */
+  async processSeaportOrderFulfilled(decodedEvent, db) {
+    if (!decodedEvent) return
+
+    console.log('Processing Seaport OrderFulfilled:', decodedEvent)
+    const { orderHash, sellerAddress, buyerAddress, nftContract, tokenId, totalPrice, transactionHash } = decodedEvent
+
+    // Resolve buyer address to FID
+    let buyerFid = null
+    if (this.neynar && buyerAddress && buyerAddress !== '0x0000000000000000000000000000000000000000') {
+      const users = await this.neynar.fetchUsersByAddress(buyerAddress)
+      if (users.length > 0) {
+        buyerFid = users[0].fid
+        await db.createOrUpdateUser({ // Ensure user exists
+            fid: buyerFid, username: users[0].username,
+            display_name: users[0].display_name, pfp_url: users[0].pfp_url
+        })
+      }
+    }
+
+    // Find listing by order_hash and mark as sold
+    // TODO: Implement db.markSeaportListingSoldByOrderHash
+    // This function would update the listing identified by orderHash,
+    // set sold_at, buyer_fid, buyer_address, sale_tx_hash, etc.
+    // It should also verify the listing is of contract_type 'seaport'.
+    const saleData = {
+        orderHash,
+        buyerAddress,
+        buyerFid,
+        saleTxHash: transactionHash,
+        price: Number(totalPrice) / 1e18, // Assuming price is in ETH/WETH (18 decimals)
+                                         // TODO: Handle different currency decimals (e.g. USDC 6 decimals)
+        contractType: 'seaport'
+    }
+    console.log('Calling db.markSeaportListingSoldByOrderHash with:', saleData)
+    // await db.markSeaportListingSoldByOrderHash(saleData);
+
+
+    // Record 'sale' activity
+    // TODO: Fetch seller_fid if needed by finding the original listing by orderHash
+    let sellerFid = null;
+    const listing = await db.db.prepare("SELECT seller_fid FROM listings WHERE order_hash = ?").bind(orderHash).first();
+    if(listing && listing.seller_fid) sellerFid = listing.seller_fid;
+
+    await db.recordActivity({
+      type: 'sale',
+      actor_fid: buyerFid, // Buyer is the actor for a sale event
+      actor_address: buyerAddress,
+      nft_contract: nftContract,
+      token_id: tokenId,
+      price: saleData.price,
+      metadata: JSON.stringify({
+        orderHash,
+        contract_type: 'seaport',
+        seller_address: sellerAddress, // Seller of the NFT
+        seller_fid: sellerFid, // Seller FID if known
+        buyer_fid: buyerFid // Buyer FID if known
+      }),
+      tx_hash: transactionHash,
+      contract_type: 'seaport'
+    })
+  }
+
+  /**
+   * Decode Seaport OrderCancelled event log
+   */
+  decodeSeaportOrderCancelled(log) {
+    try {
+      const decoded = decodeEventLog({
+        abi: SEAPORT_ABI,
+        data: log.data,
+        topics: log.topics,
+        eventName: 'OrderCancelled',
+        strict: false
+      })
+      if (!decoded || !decoded.args) return null
+
+      const { orderHash, offerer, zone } = decoded.args
+      return {
+        eventName: decoded.eventName,
+        orderHash,
+        cancellerAddress: offerer, // Offerer is the one who signed and cancelled the order
+        zone,
+        blockNumber: Number(log.blockNumber),
+        transactionHash: log.transactionHash,
+        logIndex: log.logIndex,
+        log: log
+      }
+    } catch (error) {
+      if (!error.message?.includes('event "OrderCancelled" not found on ABI') && !error.message?.includes('data is required')) {
+        console.error('Error decoding Seaport OrderCancelled event:', error, log)
+      }
+      return null
+    }
+  }
+
+  /**
+   * Process Seaport OrderCancelled event
+   */
+  async processSeaportOrderCancelled(decodedEvent, db) {
+    if (!decodedEvent) return
+
+    console.log('Processing Seaport OrderCancelled:', decodedEvent)
+    const { orderHash, cancellerAddress, transactionHash } = decodedEvent
+
+    // TODO: Implement db.cancelSeaportListingByOrderHash
+    // This function would find the listing by orderHash, verify cancellerAddress matches seller_address,
+    // and set cancelled_at, cancel_tx_hash. It should ensure contract_type is 'seaport'.
+    const cancelData = {
+        orderHash,
+        cancellerAddress,
+        cancelTxHash: transactionHash,
+        contractType: 'seaport'
+    }
+    console.log('Calling db.cancelSeaportListingByOrderHash with:', cancelData)
+    // await db.cancelSeaportListingByOrderHash(cancelData);
+
+    // Record 'listing_cancelled' activity
+    // Need to fetch listing details (NFT contract, token ID, seller FID) for activity recording
+    const listing = await db.db.prepare("SELECT nft_contract, token_id, seller_fid, price FROM listings WHERE order_hash = ?").bind(orderHash).first();
+    if (listing) {
+      await db.recordActivity({
+        type: 'listing_cancelled',
+        actor_fid: listing.seller_fid, // Seller is the actor
+        actor_address: cancellerAddress,
+        nft_contract: listing.nft_contract,
+        token_id: listing.token_id,
+        price: listing.price, // Price from original listing
+        metadata: JSON.stringify({
+            orderHash,
+            contract_type: 'seaport'
+        }),
+        tx_hash: transactionHash,
+        contract_type: 'seaport'
+      })
+    } else {
+        console.warn(`Could not find listing for orderHash ${orderHash} to record cancel activity.`)
+    }
+  }
+
+  /**
+   * Decode Seaport OrdersMatched event log
+   */
+  decodeSeaportOrdersMatched(log) {
+    try {
+      const decoded = decodeEventLog({
+        abi: SEAPORT_ABI,
+        data: log.data,
+        topics: log.topics,
+        eventName: 'OrdersMatched',
+        strict: false
+      })
+      if (!decoded || !decoded.args) return null
+
+      const { orderHashes } = decoded.args
+      return {
+        eventName: decoded.eventName,
+        orderHashes, // Array of order hashes
+        blockNumber: Number(log.blockNumber),
+        transactionHash: log.transactionHash,
+        logIndex: log.logIndex,
+        log: log
+      }
+    } catch (error) {
+      if (!error.message?.includes('event "OrdersMatched" not found on ABI') && !error.message?.includes('data is required')) {
+        console.error('Error decoding Seaport OrdersMatched event:', error, log)
+      }
+      return null
+    }
+  }
+
+  /**
+   * Process Seaport OrdersMatched event
+   * This event contains multiple orderHashes that were matched together.
+   * Each hash might correspond to an OrderFulfilled event, or this event itself signifies fulfillment.
+   */
+  async processSeaportOrdersMatched(decodedEvent, db) {
+    if (!decodedEvent) return
+
+    console.log('Processing Seaport OrdersMatched:', decodedEvent)
+    const { orderHashes, transactionHash } = decodedEvent
+
+    // For each orderHash, it's likely an OrderFulfilled event was also emitted.
+    // If not, we might need to fetch transaction receipts to get more details for each matched order.
+    // For now, we assume OrderFulfilled events are processed separately.
+    // This handler could be used to link matched orders or trigger secondary checks.
+
+    // Example: Record an activity for matching, or ensure each orderHash is processed.
+    for (const orderHash of orderHashes) {
+      // Potentially, ensure this orderHash is marked as sold if an OrderFulfilled event was missed.
+      // However, relying on OrderFulfilled event is preferred.
+      console.log(`OrderMatched: ${orderHash} in tx ${transactionHash}. Ensure it is processed.`);
+
+      // Minimal activity logging for OrdersMatched if desired
+      // await db.recordActivity({
+      //   type: 'orders_matched_debug', // Custom type for debugging/tracking
+      //   actor_address: 'SeaportContract', // System event
+      //   metadata: JSON.stringify({ orderHash, matched_in_tx: transactionHash, contract_type: 'seaport' }),
+      //   tx_hash: transactionHash,
+      //   contract_type: 'seaport'
+      // });
+    }
+  }
+
+  // mapSeaportEventToDbSchema is integrated into each processSeaport<EventName> function.
+
+  /**
+   * Decode and process a single log
+   */
+  async decodeAndProcessLog(log, db) {
+    let decodedEvent = null;
+    let eventAbiType = null; // 'NFT_EXCHANGE' or 'SEAPORT'
+
+    // Try decoding with NFT Exchange ABI first
+    try {
+      const decodedNftExchange = decodeEventLog({
+        abi: NFT_EXCHANGE_EVENTS,
+        data: log.data,
+        topics: log.topics,
+        strict: false // Do not throw if event not found
+      });
+      if (decodedNftExchange && decodedNftExchange.eventName) {
+        decodedEvent = {
+          eventName: decodedNftExchange.eventName,
+          args: decodedNftExchange.args,
+          blockNumber: Number(log.blockNumber),
+          transactionHash: log.transactionHash,
+          logIndex: log.logIndex
+        };
+        eventAbiType = 'NFT_EXCHANGE';
+      }
+    } catch (e) {
+      // Ignore if NFT_EXCHANGE_EVENTS decoding fails, try Seaport next
+    }
+
+    // If not decoded by NFT Exchange ABI, try Seaport ABI
+    // TODO: Add a check for log.address to ensure it's the Seaport contract address
+    // if (this.env.SEAPORT_CONTRACT_ADDRESS && log.address.toLowerCase() === this.env.SEAPORT_CONTRACT_ADDRESS.toLowerCase())
+    if (!decodedEvent) {
+      const seaportOrderFulfilled = this.decodeSeaportOrderFulfilled(log);
+      if (seaportOrderFulfilled) {
+        decodedEvent = seaportOrderFulfilled;
+        eventAbiType = 'SEAPORT';
+      } else {
+        const seaportOrderCancelled = this.decodeSeaportOrderCancelled(log);
+        if (seaportOrderCancelled) {
+          decodedEvent = seaportOrderCancelled;
+          eventAbiType = 'SEAPORT';
+        } else {
+          const seaportOrdersMatched = this.decodeSeaportOrdersMatched(log);
+          if (seaportOrdersMatched) {
+            decodedEvent = seaportOrdersMatched;
+            eventAbiType = 'SEAPORT';
+          }
+        }
+      }
+    }
+
+    if (decodedEvent && eventAbiType === 'NFT_EXCHANGE') {
+      await this.processEvent(decodedEvent, db); // Existing handler for NFT Exchange
+      return decodedEvent;
+    } else if (decodedEvent && eventAbiType === 'SEAPORT') {
+      switch (decodedEvent.eventName) {
+        case 'OrderFulfilled':
+          await this.processSeaportOrderFulfilled(decodedEvent, db);
+          break;
+        case 'OrderCancelled':
+          await this.processSeaportOrderCancelled(decodedEvent, db);
+          break;
+        case 'OrdersMatched':
+          await this.processSeaportOrdersMatched(decodedEvent, db);
+          break;
+        default:
+          console.log('Unhandled Seaport event:', decodedEvent.eventName, decodedEvent);
+      }
+      return decodedEvent;
+    } else {
+      // console.log('Log did not match known ABIs or event not found:', log);
+      return null;
     }
   }
 }
