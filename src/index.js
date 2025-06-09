@@ -20,7 +20,7 @@ app.get('/.well-known/farcaster.json', async (c) => {
     "frame": {
       "version": "1",
       "name": "Mint Exchange",
-      "subtitle": "Farcaster Native NFT Marketplace",
+      "subtitle": "Farcaster NFT Marketplace",
       "description": "Buy and sell NFTs all within Farcaster",
       "primaryCategory": "shopping",
       "tags": ["nft", "opensea"],
