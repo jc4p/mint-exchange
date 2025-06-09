@@ -25,6 +25,7 @@
 	"dependencies": {
 		"@farcaster/frame-sdk": "^0.0.60",
 		"@farcaster/quick-auth": "^0.0.6",
+		"@opensea/seaport-js": "^4.0.4",
 		"hono": "^4.7.11",
 		"mitt": "^3.0.1",
 		"viem": "^2.30.6"

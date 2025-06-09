@@ -168,14 +168,15 @@ export class ListingDetails extends BaseElement {
         actionBtn.textContent = 'Approving USDC...'
       }
       
-      await transactionManager.approveUSDC(listing.price)
+      await transactionManager.approveUSDC(listing.price, listing.contractType || 'nft_exchange')
 
       // Then purchase NFT
       if (actionBtn) {
         actionBtn.textContent = 'Purchasing NFT...'
       }
       
-      const purchaseTxHash = await transactionManager.buyListing(listing.blockchainListingId)
+      // Pass the full listing object for Seaport orders
+      const purchaseTxHash = await transactionManager.buyListing(listing)
 
       // Notify backend immediately about the purchase
       if (actionBtn) {
@@ -236,7 +237,9 @@ export class ListingDetails extends BaseElement {
       const listing = await response.json()
       
       // Cancel the listing on the smart contract
-      const cancelTxHash = await transactionManager.cancelListing(listing.blockchainListingId)
+      // For Seaport, we need to pass the order hash instead of listing ID
+      const listingIdOrOrderHash = listing.contractType === 'seaport' ? listing.orderHash : listing.blockchainListingId
+      const cancelTxHash = await transactionManager.cancelListing(listingIdOrOrderHash, listing.contractType || 'nft_exchange')
 
       // Notify backend immediately about the cancellation
       if (actionBtn) {

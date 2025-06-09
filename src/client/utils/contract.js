@@ -1,10 +1,15 @@
 import { encodeFunctionData, parseAbi, decodeFunctionResult } from 'viem'
+import { SEAPORT_ADDRESS } from './seaport-config.js'
 
 // Contract addresses from environment
 export const ADDRESSES = {
   NFT_EXCHANGE: '0x06fB7424Ba65D587405b9C754Bc40dA9398B72F0',
-  USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+  USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  SEAPORT: SEAPORT_ADDRESS
 }
+
+// Export for adapter compatibility
+export const NFT_EXCHANGE_ADDRESS = ADDRESSES.NFT_EXCHANGE
 
 // Helper function to make RPC calls through our proxy
 async function rpcCall(method, params = []) {
