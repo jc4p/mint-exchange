@@ -163,25 +163,41 @@ export class TransactionManager {
     if (useSeaport) {
       console.log('Checking Seaport conduit approval...')
       const approvalTarget = CONDUIT_ADDRESS
+      console.log('Conduit address:', approvalTarget)
+      console.log('Checking approval for:', { nftContract, account, approvalTarget, isERC1155 })
       
       let isApproved = false
       if (isERC1155) {
-        const approval = await publicClient.readContract({
-          address: nftContract,
-          abi: ERC1155_ABI,
-          functionName: 'isApprovedForAll',
-          args: [account, approvalTarget]
-        })
-        isApproved = approval
+        console.log('Calling isApprovedForAll for ERC1155...')
+        try {
+          const approval = await publicClient.readContract({
+            address: nftContract,
+            abi: ERC1155_ABI,
+            functionName: 'isApprovedForAll',
+            args: [account, approvalTarget]
+          })
+          console.log('ERC1155 approval status:', approval)
+          isApproved = approval
+        } catch (error) {
+          console.error('Error checking ERC1155 approval:', error)
+          throw error
+        }
       } else {
         // For ERC721, check isApprovedForAll
-        const approval = await publicClient.readContract({
-          address: nftContract,
-          abi: ERC721_ABI,
-          functionName: 'isApprovedForAll',
-          args: [account, approvalTarget]
-        })
-        isApproved = approval
+        console.log('Calling isApprovedForAll for ERC721...')
+        try {
+          const approval = await publicClient.readContract({
+            address: nftContract,
+            abi: ERC721_ABI,
+            functionName: 'isApprovedForAll',
+            args: [account, approvalTarget]
+          })
+          console.log('ERC721 approval status:', approval)
+          isApproved = approval
+        } catch (error) {
+          console.error('Error checking ERC721 approval:', error)
+          throw error
+        }
       }
 
       if (!isApproved) {
@@ -233,6 +249,16 @@ export class TransactionManager {
     }
 
     // Create the listing through the adapter
+    console.log('Creating listing through adapter...')
+    console.log('Adapter type:', useSeaport ? 'Seaport' : 'NFTExchange')
+    console.log('Listing parameters:', {
+      contract: nftContract,
+      tokenId,
+      isERC721: !isERC1155,
+      price,
+      duration: durationInDays * 24 * 60 * 60
+    })
+    
     try {
       const result = await adapter.createListing(
         { contract: nftContract, tokenId, isERC721: !isERC1155 },

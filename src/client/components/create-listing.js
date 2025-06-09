@@ -95,11 +95,13 @@ export class CreateListing extends BaseElement {
       )
       
       // Extract txHash and order data
-      const txHash = typeof result === 'string' ? result : result.hash
+      // For Seaport, there's no transaction - just a signed order
+      const isSeaportOrder = typeof result === 'object' && result.contractType === 'seaport'
+      const txHash = isSeaportOrder ? null : (typeof result === 'string' ? result : result.hash)
       const orderData = typeof result === 'object' ? result.order : null
+      const orderHash = isSeaportOrder ? result.hash : null
       
-      console.log('Transaction submitted:', txHash)
-      console.log('Seaport order data:', orderData)
+      console.log('Result:', { txHash, orderHash, orderData, isSeaportOrder })
       
       // Calculate expiry date
       const expiryDate = new Date()
@@ -118,14 +120,15 @@ export class CreateListing extends BaseElement {
           price: price,
           expiry: expiryDate.toISOString(),
           contractType: 'seaport', // Always Seaport for new listings
-          orderParameters: orderData, // Include Seaport order data
+          orderHash: orderHash, // Seaport order hash
+          orderParameters: orderData, // Include Seaport order data (parameters + signature)
           metadata: {
             name: nft.title,
             description: nft.description,
             image_url: nft.media[0]?.gateway || '',
             metadata_uri: ''
           },
-          txHash: txHash
+          txHash: txHash // Will be null for Seaport
         })
       })
       

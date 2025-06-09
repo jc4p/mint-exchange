@@ -223,24 +223,57 @@ export class SeaportAdapter extends MarketplaceAdapter {
       conduitKey: '0x0000000000000000000000000000000000000000000000000000000000000000'
     }
 
+    console.log('Creating Seaport order with parameters:', order)
+    
     try {
-      const { executeAllActions } = await this.seaport.createOrder(
-        order,
-        this.account
-      )
+      // For Seaport, we need to:
+      // 1. Get the order components with proper formatting
+      // 2. Sign the order
+      // 3. Return the order hash and signed order
       
-      const response = await executeAllActions()
+      // Get standardized order parameters
+      const orderParameters = {
+        offerer: this.account,
+        zone: order.zone || ethers.ZeroAddress,
+        offer: order.offer,
+        consideration: order.consideration,
+        orderType: order.orderType,
+        startTime: Math.floor(Date.now() / 1000),
+        endTime: order.endTime,
+        zoneHash: order.zoneHash || ethers.ZeroHash,
+        salt: ethers.hexlify(ethers.randomBytes(32)),
+        conduitKey: order.conduitKey || ethers.ZeroHash,
+        counter: "0" // Will be fetched from chain
+      }
       
-      // Extract order hash from the response
-      const orderHash = response.orderHash || response.hash
+      console.log('Order parameters before getting counter:', orderParameters)
       
-      return { 
-        hash: orderHash, 
+      // Get the current counter from the contract
+      const counter = await this.seaport.getCounter(this.account)
+      orderParameters.counter = counter.toString()
+      
+      console.log('Final order parameters:', orderParameters)
+      
+      // Get the order hash
+      const orderHash = this.seaport.getOrderHash(orderParameters)
+      console.log('Order hash:', orderHash)
+      
+      // Sign the order using the signer
+      const signature = await this.seaport.signOrder(orderParameters, this.account)
+      console.log('Order signature:', signature)
+      
+      // Return the signed order data
+      return {
+        hash: orderHash,
         contractType: 'seaport',
-        order: response.order || order
+        order: {
+          parameters: orderParameters,
+          signature: signature
+        }
       }
     } catch (error) {
       console.error('Error creating Seaport order:', error)
+      console.error('Error stack:', error.stack)
       throw error
     }
   }
