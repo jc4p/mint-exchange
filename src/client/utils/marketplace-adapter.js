@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer'
 import { Seaport } from '@opensea/seaport-js'
 import { createWalletClient, custom, parseUnits, formatUnits } from 'viem'
 import { base } from 'viem/chains'
@@ -12,6 +13,11 @@ import {
   calculateFeeAmounts 
 } from './seaport-config.js'
 import { NFT_EXCHANGE_ADDRESS, NFT_EXCHANGE_ABI } from './contract.js'
+
+// Make Buffer available globally for Seaport SDK
+if (typeof window !== 'undefined' && !window.Buffer) {
+  window.Buffer = Buffer
+}
 
 // Base marketplace adapter class
 export class MarketplaceAdapter {
