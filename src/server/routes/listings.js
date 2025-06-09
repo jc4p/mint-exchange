@@ -231,7 +231,6 @@ listings.get('/:id', async (c) => {
 })
 
 import { getOrderHash } from '../utils/seaport.js'; // Import getOrderHash
-import { SEAPORT_ABI } from '../blockchain.js'; // Import SEAPORT_ABI for event decoding
 
 // Create listing (protected route - requires auth)
 listings.post('/', authMiddleware(), async (c) => {
