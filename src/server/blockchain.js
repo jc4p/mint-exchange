@@ -4,9 +4,8 @@ import { NeynarService } from './neynar.js'
 import { fetchNFTMetadata } from './utils/metadata.js'
 import { ShareImageQueue } from './services/share-image-queue.js'
 
-// Contract configuration
-const CONTRACT_ADDRESS = '0x06fB7424Ba65D587405b9C754Bc40dA9398B72F0'
-const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+// Contract configuration - these are now in environment variables
+// Use env.CONTRACT_ADDRESS, env.USDC_ADDRESS, env.SEAPORT_CONTRACT_ADDRESS, env.FEE_RECIPIENT
 
 // Event signatures for the NFT Exchange contract
 const NFT_EXCHANGE_EVENTS = parseAbi([
