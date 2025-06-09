@@ -67,6 +67,7 @@ async function readContract({ address, abi, functionName, args = [] }) {
 
 // NFT Exchange contract ABI (only the functions we need)
 export const NFT_EXCHANGE_ABI = parseAbi([
+  // Functions
   'function createListing(address nftContract, uint256 tokenId, uint256 price, uint256 duration) returns (uint256 listingId)',
   'function cancelListing(uint256 listingId)',
   'function buyListing(uint256 listingId)',
@@ -76,7 +77,26 @@ export const NFT_EXCHANGE_ABI = parseAbi([
   'function isERC721(address nftContract) view returns (bool)',
   'function isERC1155(address nftContract) view returns (bool)',
   'function getERC1155Balance(address nftContract, address owner, uint256 tokenId) view returns (uint256)',
-  'function isERC721Owner(address nftContract, address owner, uint256 tokenId) view returns (bool)'
+  'function isERC721Owner(address nftContract, address owner, uint256 tokenId) view returns (bool)',
+  'function listings(uint256) view returns (address seller, address nftContract, uint256 tokenId, uint256 price, uint256 expiresAt, bool isERC721, bool sold, bool cancelled)',
+  
+  // Custom errors
+  'error ListingNotFound()',
+  'error ListingExpired()',
+  'error ListingAlreadySold()',
+  'error ListingAlreadyCancelled()',
+  'error UnauthorizedCaller()',
+  'error InvalidNFTContract()',
+  'error InsufficientNFTBalance()',
+  'error InsufficientUSDCBalance()',
+  'error InvalidPrice()',
+  'error InvalidDuration()',
+  'error TransferFailed()',
+  'error UnsupportedNFTStandard()',
+  'error OfferNotFound()',
+  'error OfferExpired()',
+  'error OfferAlreadyAccepted()',
+  'error OfferAlreadyCancelled()'
 ])
 
 // ERC20 ABI for USDC

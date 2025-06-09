@@ -23,7 +23,6 @@ Verify that `wrangler.toml` has all the required environment variables:
 ### 3. Database Setup
 ```bash
 # Run database migrations
-wrangler d1 execute nft-exchange --local --file=./schema.sql
 wrangler d1 execute nft-exchange --local --file=./scripts/seaport-migration.sql
 ```
 

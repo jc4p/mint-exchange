@@ -459,7 +459,7 @@ export class CreateListing extends BaseElement {
                   />
                   <span class="price-suffix">USDC</span>
                 </div>
-                <p class="fee-notice">A 1% platform fee will be added to the buyer's total</p>
+                <p class="fee-notice">A 1% platform fee will be taken at the time of sale</p>
                 ${error ? `<p class="error-message">${error}</p>` : ''}
               </div>
               

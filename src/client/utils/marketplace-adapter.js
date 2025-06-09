@@ -1,6 +1,7 @@
 import { Seaport } from '@opensea/seaport-js'
 import { createWalletClient, custom, parseUnits, formatUnits } from 'viem'
 import { base } from 'viem/chains'
+import { ethers } from 'ethers'
 import { 
   SEAPORT_ADDRESS, 
   USDC_ADDRESS, 
@@ -123,31 +124,57 @@ export class SeaportAdapter extends MarketplaceAdapter {
     super(signer, account)
     this.publicClient = publicClient
     
-    // Create ethers provider wrapper for Seaport SDK
-    const provider = {
-      getNetwork: async () => ({ chainId: base.id }),
-      getSigner: () => ({
-        getAddress: async () => account,
-        signMessage: async (message) => {
-          return await signer.signMessage({ message, account })
-        },
-        _signTypedData: async (domain, types, value) => {
-          return await signer.signTypedData({
-            domain,
-            types,
-            primaryType: Object.keys(types).find(t => t !== 'EIP712Domain'),
-            message: value,
-            account
-          })
-        },
-        sendTransaction: async (tx) => {
-          const hash = await signer.sendTransaction(tx)
-          return { hash, wait: async () => ({ status: 1 }) }
-        }
+    // Create an ethers provider that wraps our RPC endpoint
+    // Use the full URL for ethers provider
+    const rpcUrl = typeof window !== 'undefined' 
+      ? `${window.location.origin}/api/rpc/proxy`
+      : 'http://localhost:8787/api/rpc/proxy'
+    const ethersProvider = new ethers.JsonRpcProvider(rpcUrl)
+    
+    // Create an ethers signer that wraps the Frame's ethProvider
+    const ethersSigner = new ethers.VoidSigner(account, ethersProvider)
+    
+    // Override the signer methods to use our viem wallet client
+    ethersSigner.signMessage = async (message) => {
+      return await signer.signMessage({ message, account })
+    }
+    
+    ethersSigner.signTypedData = async (domain, types, value) => {
+      return await signer.signTypedData({
+        domain,
+        types,
+        primaryType: Object.keys(types).find(t => t !== 'EIP712Domain'),
+        message: value,
+        account
       })
     }
+    
+    ethersSigner.sendTransaction = async (tx) => {
+      // Convert ethers transaction to viem format
+      const viemTx = {
+        to: tx.to,
+        data: tx.data,
+        value: tx.value ? BigInt(tx.value.toString()) : undefined,
+        from: account
+      }
+      
+      const hash = await signer.sendTransaction(viemTx)
+      
+      // Return ethers-compatible transaction response
+      return {
+        hash,
+        wait: async () => {
+          const receipt = await publicClient.waitForTransactionReceipt({ hash })
+          return {
+            status: receipt.status === 'success' ? 1 : 0,
+            transactionHash: receipt.transactionHash
+          }
+        }
+      }
+    }
 
-    this.seaport = new Seaport(provider, {
+    // Initialize Seaport with the ethers signer
+    this.seaport = new Seaport(ethersSigner, {
       overrides: { contractAddress: SEAPORT_ADDRESS }
     })
   }
