@@ -1,3 +1,8 @@
+// Polyfill Buffer for browser environment (needed by seaport-js)
+import { Buffer } from 'buffer'
+globalThis.Buffer = Buffer
+window.Buffer = Buffer
+
 import './styles/base.css'
 import './styles/app.css'
 import './components/frame-provider.js'

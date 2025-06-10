@@ -295,13 +295,13 @@ export async function checkNFTOwnership(nftContract, tokenId, ownerAddress, isER
 /**
  * Helper to check NFT approval status
  */
-export async function checkNFTApproval(nftContract, tokenId, ownerAddress, isERC1155 = false) {
+export async function checkNFTApproval(nftContract, tokenId, ownerAddress, spenderAddress, isERC1155 = false) {
   console.log('Checking NFT approval:', {
     nftContract,
     tokenId,
     ownerAddress,
     isERC1155,
-    nftExchange: ADDRESSES.NFT_EXCHANGE
+    spenderAddress
   })
   
   if (isERC1155) {
@@ -309,15 +309,27 @@ export async function checkNFTApproval(nftContract, tokenId, ownerAddress, isERC
       address: nftContract,
       abi: ERC1155_ABI,
       functionName: 'isApprovedForAll',
-      args: [ownerAddress, ADDRESSES.NFT_EXCHANGE]
+      args: [ownerAddress, spenderAddress]
     })
     
     console.log('ERC1155 isApprovedForAll result:', isApproved)
     return isApproved
   } else {
     // For ERC721, check both getApproved and isApprovedForAll
+    
+    // First, check operator approval (most common for marketplaces)
+    const isApprovedForAll = await readContract({
+      address: nftContract,
+      abi: ERC721_ABI,
+      functionName: 'isApprovedForAll',
+      args: [ownerAddress, spenderAddress]
+    })
+    
+    console.log('ERC721 isApprovedForAll result:', isApprovedForAll)
+    if (isApprovedForAll) return true
+    
+    // If not approved for all, check specific token approval
     try {
-      // Check specific token approval
       const approvedAddress = await readContract({
         address: nftContract,
         abi: ERC721_ABI,
@@ -327,23 +339,13 @@ export async function checkNFTApproval(nftContract, tokenId, ownerAddress, isERC
       
       console.log('ERC721 getApproved result:', approvedAddress)
       
-      if (approvedAddress.toLowerCase() === ADDRESSES.NFT_EXCHANGE.toLowerCase()) {
+      if (approvedAddress.toLowerCase() === spenderAddress.toLowerCase()) {
         return true
       }
     } catch (error) {
-      console.log('getApproved error (might be normal):', error.message)
-      // Token might not exist or other error, continue to check operator approval
+      console.log('getApproved error (might be normal if token has no specific approval):', error.message)
     }
     
-    // Check operator approval
-    const isApprovedForAll = await readContract({
-      address: nftContract,
-      abi: ERC721_ABI,
-      functionName: 'isApprovedForAll',
-      args: [ownerAddress, ADDRESSES.NFT_EXCHANGE]
-    })
-    
-    console.log('ERC721 isApprovedForAll result:', isApprovedForAll)
-    return isApprovedForAll
+    return false // Return false if neither check passed
   }
 }

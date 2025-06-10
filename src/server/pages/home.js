@@ -40,7 +40,7 @@ export async function homePage(c) {
       image: `https://picsum.photos/seed/${i}/400/400`,
       price: (Math.random() * 100).toFixed(2),
       seller: {
-        address: i % 2 === 0 ? '0x0db12C0A67bc5B8942ea3126a465d7a0b23126C7' : `0x${Math.random().toString(16).slice(2, 10)}`,
+        address: i % 2 === 0 ? '0x1Ba2aF9529920731c248f20f716d8E9F3A0319A4' : `0x${Math.random().toString(16).slice(2, 10)}`,
         username: i % 2 === 0 ? 'kasra' : `user${i}`,
         fid: i % 2 === 0 ? 12345 : 10000 + i
       }

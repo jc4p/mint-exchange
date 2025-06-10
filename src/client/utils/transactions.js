@@ -159,51 +159,15 @@ export class TransactionManager {
       publicClient
     )
 
-    // For Seaport, check NFT approval for conduit
+    // For Seaport, always request approval for the conduit.
+    // The user's wallet will handle cases where approval already exists.
     if (useSeaport) {
-      console.log('Checking Seaport conduit approval...')
+      console.log('--- Seaport Listing ---')
       const approvalTarget = CONDUIT_ADDRESS
-      console.log('Conduit address:', approvalTarget)
-      console.log('Checking approval for:', { nftContract, account, approvalTarget, isERC1155 })
+      console.log('Requesting approval for Seaport Conduit:', approvalTarget)
       
-      let isApproved = false
-      if (isERC1155) {
-        console.log('Calling isApprovedForAll for ERC1155...')
-        try {
-          const approval = await publicClient.readContract({
-            address: nftContract,
-            abi: ERC1155_ABI,
-            functionName: 'isApprovedForAll',
-            args: [account, approvalTarget]
-          })
-          console.log('ERC1155 approval status:', approval)
-          isApproved = approval
-        } catch (error) {
-          console.error('Error checking ERC1155 approval:', error)
-          throw error
-        }
-      } else {
-        // For ERC721, check isApprovedForAll
-        console.log('Calling isApprovedForAll for ERC721...')
-        try {
-          const approval = await publicClient.readContract({
-            address: nftContract,
-            abi: ERC721_ABI,
-            functionName: 'isApprovedForAll',
-            args: [account, approvalTarget]
-          })
-          console.log('ERC721 approval status:', approval)
-          isApproved = approval
-        } catch (error) {
-          console.error('Error checking ERC721 approval:', error)
-          throw error
-        }
-      }
-
-      if (!isApproved) {
-        console.log('Approving NFT for Seaport conduit...')
-        let approveTx
-        
+      let approveTx
+      try {
         if (isERC1155) {
           approveTx = await walletClient.writeContract({
             address: nftContract,
@@ -220,31 +184,29 @@ export class TransactionManager {
           })
         }
         
-        console.log('Approval transaction:', approveTx)
+        console.log('Approval transaction sent:', approveTx)
         await this.waitForTransaction(approveTx)
-        console.log('✅ NFT approved for Seaport')
+        console.log('✅ NFT approval confirmed for Seaport conduit')
+      } catch (error) {
+        // This can happen if the user rejects the transaction.
+        // Or if the contract doesn't support setApprovalForAll, which is rare.
+        console.error('Approval transaction failed:', error)
+        throw new Error('NFT approval is required to list on Seaport.')
       }
     } else {
-      // Original NFTExchange approval logic
-      console.log('Checking current approval status...')
-      const isApproved = await checkNFTApproval(nftContract, tokenId, account, isERC1155)
-      console.log('Current approval status:', isApproved)
-      
+      // Original NFTExchange approval logic (remains conditional)
+      const isApproved = await checkNFTApproval(nftContract, tokenId, account, ADDRESSES.NFT_EXCHANGE, isERC1155)
       if (!isApproved) {
-        console.log('NFT not approved, sending approval transaction...')
+        console.log('NFT not approved for NFTExchange, sending approval transaction...')
         let approveData
-        
         if (isERC1155) {
           approveData = encodeERC1155.setApprovalForAll(ADDRESSES.NFT_EXCHANGE, true)
         } else {
           approveData = encodeERC721.approve(ADDRESSES.NFT_EXCHANGE, tokenId)
         }
-        
         const approveTx = await this.sendTransaction(account, nftContract, approveData)
-        console.log('Approval transaction hash:', approveTx)
-        
         await this.waitForTransaction(approveTx)
-        console.log('✅ NFT approved successfully')
+        console.log('✅ NFT approved for NFTExchange successfully')
       }
     }
 
@@ -323,7 +285,20 @@ export class TransactionManager {
 
     // For Seaport, approve USDC if needed
     if (contractType === 'seaport') {
-      await this.approveUSDC(listing.price, 'seaport')
+      // For Seaport, we need to approve the total amount (including fees)
+      // Calculate total from the order's consideration items
+      if (listing.orderData && listing.orderData.parameters && listing.orderData.parameters.consideration) {
+        const totalAmount = listing.orderData.parameters.consideration.reduce((sum, item) => {
+          return sum + BigInt(item.startAmount)
+        }, 0n)
+        // Convert from USDC smallest unit (6 decimals) to human readable
+        const totalInUSDC = Number(totalAmount) / 1e6
+        console.log(`Approving total USDC amount for Seaport: ${totalInUSDC} USDC (${totalAmount} smallest units)`)
+        await this.approveUSDC(totalInUSDC, 'seaport')
+      } else {
+        // Fallback to listing price if order data not available
+        await this.approveUSDC(listing.price, 'seaport')
+      }
     }
     
     const result = await adapter.buyListing(listing)

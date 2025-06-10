@@ -25,7 +25,7 @@ export const OrderType = {
 export const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
 
 // Fee configuration
-export const FEE_RECIPIENT = '0x0db12C0A67bc5B8942ea3126a465d7a0b23126C7'
+export const FEE_RECIPIENT = '0x1Ba2aF9529920731c248f20f716d8E9F3A0319A4'
 export const FEE_BASIS_POINTS = 100 // 1% fee
 
 // Conduit configuration (default conduit)

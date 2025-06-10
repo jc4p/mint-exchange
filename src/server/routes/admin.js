@@ -972,6 +972,57 @@ admin.post('/debug-seaport-fulfillment/:id', async (c) => {
       checks.approvals.nftError = e.message
     }
     
+    // Check NFT ownership
+    try {
+      const nftContract = orderParameters.offer[0].token
+      const tokenId = orderParameters.offer[0].identifierOrCriteria
+      const isERC721 = orderParameters.offer[0].itemType === 2
+      
+      if (isERC721) {
+        const currentOwner = await client.readContract({
+          address: nftContract,
+          abi: [{
+            name: 'ownerOf',
+            type: 'function',
+            stateMutability: 'view',
+            inputs: [{ name: 'tokenId', type: 'uint256' }],
+            outputs: [{ name: '', type: 'address' }]
+          }],
+          functionName: 'ownerOf',
+          args: [BigInt(tokenId)]
+        })
+        
+        checks.ownership = {
+          currentOwner: currentOwner,
+          expectedOwner: orderParameters.offerer,
+          ownershipValid: currentOwner.toLowerCase() === orderParameters.offerer.toLowerCase()
+        }
+      } else {
+        const balance = await client.readContract({
+          address: nftContract,
+          abi: [{
+            name: 'balanceOf',
+            type: 'function',
+            stateMutability: 'view',
+            inputs: [
+              { name: 'account', type: 'address' },
+              { name: 'id', type: 'uint256' }
+            ],
+            outputs: [{ name: '', type: 'uint256' }]
+          }],
+          functionName: 'balanceOf',
+          args: [orderParameters.offerer, BigInt(tokenId)]
+        })
+        
+        checks.ownership = {
+          currentBalance: balance.toString(),
+          hasBalance: balance > 0n
+        }
+      }
+    } catch (e) {
+      checks.ownership = { error: e.message }
+    }
+    
     // Check order timing
     const now = Math.floor(Date.now() / 1000)
     checks.timing = {
@@ -991,7 +1042,9 @@ admin.post('/debug-seaport-fulfillment/:id', async (c) => {
         checks.buyerIsRecipient ? "Buyer is a recipient in consideration - this will cause InvalidSigner error" : null,
         !checks.timing.isActive ? "Order is not active (check start/end times)" : null,
         !checks.approvals.usdcSufficient ? "Buyer needs to approve more USDC" : null,
-        !checks.approvals.nftApproved && !checks.approvals.nftApprovedForAll ? "Seller's NFT is not approved to Seaport conduit" : null
+        !checks.approvals.nftApproved && !checks.approvals.nftApprovedForAll ? "Seller's NFT is not approved to Seaport conduit" : null,
+        checks.ownership && !checks.ownership.ownershipValid ? "Seller no longer owns the NFT - order is invalid" : null,
+        checks.ownership && checks.ownership.hasBalance === false ? "Seller no longer has balance for this ERC1155 NFT" : null
       ].filter(Boolean)
     })
     
@@ -1187,6 +1240,358 @@ admin.post('/cleanup-nftexchange-listings', async (c) => {
   } catch (error) {
     console.error('Error running cleanup:', error)
     return c.json({ error: 'Failed to run cleanup', details: error.message }, 500)
+  }
+})
+
+// Check exact fulfillment requirements for a listing
+admin.post('/check-fulfillment-state/:id', async (c) => {
+  try {
+    const listingId = c.req.param('id')
+    const buyer = c.req.query('buyer')
+    if (!buyer) {
+      return c.json({ error: 'Buyer address is required' }, 400)
+    }
+    
+    const db = new Database(c.env.DB)
+    const { createRpcClient } = await import('../utils/rpc-client.js')
+    const client = createRpcClient(c.env)
+    
+    // Get listing
+    const listing = await db.db
+      .prepare('SELECT * FROM listings WHERE id = ?')
+      .bind(listingId)
+      .first()
+    
+    if (!listing || !listing.order_parameters) {
+      return c.json({ error: 'Listing not found or not a Seaport listing' }, 404)
+    }
+    
+    const orderData = JSON.parse(listing.order_parameters)
+    const result = {
+      listing: {
+        id: listing.id,
+        price: listing.price,
+        seller: listing.seller_address,
+        nftContract: listing.nft_contract,
+        tokenId: listing.token_id
+      },
+      buyer: buyer,
+      checks: {
+        nft: {},
+        usdc: {},
+        order: {}
+      }
+    }
+    
+    // Check NFT ownership and approval
+    const nftContract = orderData.parameters.offer[0].token
+    const tokenId = orderData.parameters.offer[0].identifierOrCriteria
+    const conduitAddress = '0xf9ed144bACaed98d0f3899B8B56c965D1A966D08'
+    
+    try {
+      // Check ownership
+      const owner = await client.readContract({
+        address: nftContract,
+        abi: [{
+          name: 'ownerOf',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [{ name: 'tokenId', type: 'uint256' }],
+          outputs: [{ name: '', type: 'address' }]
+        }],
+        functionName: 'ownerOf',
+        args: [BigInt(tokenId)]
+      })
+      
+      result.checks.nft.owner = owner
+      result.checks.nft.ownerIsOfferer = owner.toLowerCase() === orderData.parameters.offerer.toLowerCase()
+      
+      // Check approval
+      const isApprovedForAll = await client.readContract({
+        address: nftContract,
+        abi: [{
+          name: 'isApprovedForAll',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [
+            { name: 'owner', type: 'address' },
+            { name: 'operator', type: 'address' }
+          ],
+          outputs: [{ name: '', type: 'bool' }]
+        }],
+        functionName: 'isApprovedForAll',
+        args: [owner, conduitAddress]
+      })
+      
+      result.checks.nft.approvedToConduit = isApprovedForAll
+      result.checks.nft.conduitAddress = conduitAddress
+    } catch (e) {
+      result.checks.nft.error = e.message
+    }
+    
+    // Check USDC balance and approval
+    const usdcAddress = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+    const totalPrice = orderData.parameters.consideration.reduce((sum, item) => {
+      return sum + BigInt(item.startAmount)
+    }, 0n)
+    
+    try {
+      // Check balance
+      const balance = await client.readContract({
+        address: usdcAddress,
+        abi: [{
+          name: 'balanceOf',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [{ name: 'account', type: 'address' }],
+          outputs: [{ name: '', type: 'uint256' }]
+        }],
+        functionName: 'balanceOf',
+        args: [buyer]
+      })
+      
+      result.checks.usdc.balance = balance.toString()
+      result.checks.usdc.required = totalPrice.toString()
+      result.checks.usdc.hasEnough = balance >= totalPrice
+      
+      // Check allowance
+      const allowance = await client.readContract({
+        address: usdcAddress,
+        abi: [{
+          name: 'allowance',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [
+            { name: 'owner', type: 'address' },
+            { name: 'spender', type: 'address' }
+          ],
+          outputs: [{ name: '', type: 'uint256' }]
+        }],
+        functionName: 'allowance',
+        args: [buyer, conduitAddress]
+      })
+      
+      result.checks.usdc.allowance = allowance.toString()
+      result.checks.usdc.allowanceSufficient = allowance >= totalPrice
+      result.checks.usdc.conduitAddress = conduitAddress
+    } catch (e) {
+      result.checks.usdc.error = e.message
+    }
+    
+    // Check order validity
+    const now = Math.floor(Date.now() / 1000)
+    result.checks.order = {
+      startTime: parseInt(orderData.parameters.startTime),
+      endTime: parseInt(orderData.parameters.endTime),
+      currentTime: now,
+      isActive: now >= parseInt(orderData.parameters.startTime) && now <= parseInt(orderData.parameters.endTime),
+      signature: orderData.signature ? 'present' : 'missing',
+      signatureLength: orderData.signature?.length || 0
+    }
+    
+    // Summary
+    result.canFulfill = 
+      result.checks.nft.ownerIsOfferer &&
+      result.checks.nft.approvedToConduit &&
+      result.checks.usdc.hasEnough &&
+      result.checks.usdc.allowanceSufficient &&
+      result.checks.order.isActive &&
+      result.checks.order.signature === 'present'
+    
+    result.issues = []
+    if (!result.checks.nft.ownerIsOfferer) result.issues.push('Seller no longer owns NFT')
+    if (!result.checks.nft.approvedToConduit) result.issues.push('NFT not approved to conduit')
+    if (!result.checks.usdc.hasEnough) result.issues.push('Insufficient USDC balance')
+    if (!result.checks.usdc.allowanceSufficient) result.issues.push('Insufficient USDC allowance')
+    if (!result.checks.order.isActive) result.issues.push('Order expired or not active')
+    if (result.checks.order.signature !== 'present') result.issues.push('Missing signature')
+    
+    return c.json(result)
+    
+  } catch (error) {
+    console.error('Error checking fulfillment state:', error)
+    return c.json({ error: 'Failed to check state', details: error.message }, 500)
+  }
+})
+
+// Simulate Seaport fulfillOrder to diagnose issues
+admin.post('/simulate-seaport-fulfillment/:id', async (c) => {
+  try {
+    const listingId = c.req.param('id')
+    const buyer = c.req.query('buyer')
+    if (!buyer) {
+      return c.json({ error: 'Buyer address is required' }, 400)
+    }
+    
+    const db = new Database(c.env.DB)
+    const { createRpcClient } = await import('../utils/rpc-client.js')
+    const { parseAbi } = await import('viem')
+    const client = createRpcClient(c.env)
+    
+    // Get listing
+    const listing = await db.db
+      .prepare('SELECT * FROM listings WHERE id = ?')
+      .bind(listingId)
+      .first()
+    
+    if (!listing || !listing.order_parameters) {
+      return c.json({ error: 'Listing not found or not a Seaport listing' }, 404)
+    }
+    
+    const orderData = JSON.parse(listing.order_parameters)
+    const SEAPORT_ADDRESS = '0x0000000000000068F116a894984e2DB1123eB395'
+    
+    try {
+      // Simulate the fulfillOrder call
+      const result = await client.simulateContract({
+        address: SEAPORT_ADDRESS,
+        abi: parseAbi([
+          'function fulfillOrder(tuple(tuple(address offerer, address zone, tuple(uint8 itemType, address token, uint256 identifierOrCriteria, uint256 startAmount, uint256 endAmount)[] offer, tuple(uint8 itemType, address token, uint256 identifierOrCriteria, uint256 startAmount, uint256 endAmount, address recipient)[] consideration, uint8 orderType, uint256 startTime, uint256 endTime, bytes32 zoneHash, uint256 salt, bytes32 conduitKey, uint256 totalOriginalConsiderationItems) parameters, bytes signature) order, bytes32 fulfillerConduitKey) payable returns (bool fulfilled)'
+        ]),
+        functionName: 'fulfillOrder',
+        args: [
+          {
+            parameters: {
+              ...orderData.parameters,
+              totalOriginalConsiderationItems: orderData.parameters.consideration.length
+            },
+            signature: orderData.signature
+          },
+          '0x0000000000000000000000000000000000000000000000000000000000000000'
+        ],
+        account: buyer
+      })
+      
+      return c.json({
+        success: true,
+        result: 'Simulation successful - order can be fulfilled',
+        request: result.request
+      })
+      
+    } catch (error) {
+      // Parse the error to get more details
+      const errorDetails = {
+        message: error.message,
+        shortMessage: error.shortMessage,
+        metaMessages: error.metaMessages,
+        cause: error.cause
+      }
+      
+      // Try to decode revert reason if available
+      if (error.data) {
+        errorDetails.data = error.data
+      }
+      
+      return c.json({
+        success: false,
+        error: 'Simulation failed',
+        details: errorDetails,
+        listing: {
+          id: listing.id,
+          seller: orderData.parameters.offerer,
+          nftContract: orderData.parameters.offer[0].token,
+          tokenId: orderData.parameters.offer[0].identifierOrCriteria
+        }
+      })
+    }
+    
+  } catch (error) {
+    console.error('Error simulating fulfillment:', error)
+    return c.json({ error: 'Failed to simulate', details: error.message }, 500)
+  }
+})
+
+// Direct NFT approval check
+admin.get('/check-nft-approval-direct/:contract/:tokenId', async (c) => {
+  try {
+    const nftContract = c.req.param('contract')
+    const tokenId = c.req.param('tokenId')
+    const owner = c.req.query('owner')
+    const spender = c.req.query('spender') || '0xf9ed144bACaed98d0f3899B8B56c965D1A966D08'
+    
+    const { createRpcClient } = await import('../utils/rpc-client.js')
+    const client = createRpcClient(c.env)
+    
+    const result = {
+      nftContract,
+      tokenId,
+      conduit: spender,
+      checks: {}
+    }
+    
+    try {
+      // Check owner
+      const currentOwner = await client.readContract({
+        address: nftContract,
+        abi: [{
+          name: 'ownerOf',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [{ name: 'tokenId', type: 'uint256' }],
+          outputs: [{ name: '', type: 'address' }]
+        }],
+        functionName: 'ownerOf',
+        args: [BigInt(tokenId)]
+      })
+      
+      result.checks.currentOwner = currentOwner
+      result.checks.expectedOwner = owner
+      result.checks.ownershipValid = owner ? currentOwner.toLowerCase() === owner.toLowerCase() : true
+      
+      // Check isApprovedForAll
+      const isApprovedForAll = await client.readContract({
+        address: nftContract,
+        abi: [{
+          name: 'isApprovedForAll',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [
+            { name: 'owner', type: 'address' },
+            { name: 'operator', type: 'address' }
+          ],
+          outputs: [{ name: '', type: 'bool' }]
+        }],
+        functionName: 'isApprovedForAll',
+        args: [currentOwner, spender]
+      })
+      
+      result.checks.isApprovedForAll = isApprovedForAll
+      
+      // Check getApproved for specific token
+      try {
+        const approvedAddress = await client.readContract({
+          address: nftContract,
+          abi: [{
+            name: 'getApproved',
+            type: 'function',
+            stateMutability: 'view',
+            inputs: [{ name: 'tokenId', type: 'uint256' }],
+            outputs: [{ name: '', type: 'address' }]
+          }],
+          functionName: 'getApproved',
+          args: [BigInt(tokenId)]
+        })
+        
+        result.checks.getApproved = approvedAddress
+        result.checks.tokenApproved = approvedAddress.toLowerCase() === spender.toLowerCase()
+      } catch (e) {
+        result.checks.getApprovedError = e.message
+      }
+      
+      result.summary = {
+        hasAnyApproval: result.checks.isApprovedForAll || result.checks.tokenApproved,
+        canTransfer: result.checks.ownershipValid && (result.checks.isApprovedForAll || result.checks.tokenApproved)
+      }
+      
+    } catch (error) {
+      result.error = error.message
+    }
+    
+    return c.json(result)
+    
+  } catch (error) {
+    console.error('Error checking NFT approval:', error)
+    return c.json({ error: 'Failed to check approval', details: error.message }, 500)
   }
 })
 
