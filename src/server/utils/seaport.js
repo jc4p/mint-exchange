@@ -15,14 +15,17 @@ export function getOrderHash(orderParameters) {
     throw new Error('Invalid orderParameters provided for hashing.');
   }
 
+  // The order hash should be calculated the same way as on the client
+  // We need to use the actual Seaport contract address, not ZeroAddress
+  const SEAPORT_ADDRESS = '0x0000000000000068F116a894984e2DB1123eB395';
+  
   // Create a minimal provider for Seaport SDK (just for hashing, no RPC needed)
   const provider = new ethers.JsonRpcProvider();
   
-  // Create Seaport instance
+  // Create Seaport instance with the correct contract address
   const seaport = new Seaport(provider, {
     overrides: {
-      // We don't need a specific contract address for just hashing
-      contractAddress: ethers.ZeroAddress
+      contractAddress: SEAPORT_ADDRESS
     }
   });
 

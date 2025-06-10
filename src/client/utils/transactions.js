@@ -285,9 +285,10 @@ export class TransactionManager {
   async approveUSDC(amount, contractType = 'seaport') {
     const userAddress = await this.getWalletAddress()
     const amountInUSDC = toUSDCAmount(amount)
-    const spenderAddress = contractType === 'seaport' ? SEAPORT_ADDRESS : ADDRESSES.NFT_EXCHANGE
+    // For Seaport, USDC needs to be approved to the conduit, not the Seaport contract
+    const spenderAddress = contractType === 'seaport' ? CONDUIT_ADDRESS : ADDRESSES.NFT_EXCHANGE
     
-    console.log('Approving USDC:', amount, 'USDC for', contractType)
+    console.log('Approving USDC:', amount, 'USDC for', contractType, 'to address:', spenderAddress)
     
     // Check current allowance
     const allowance = await checkUSDCAllowance(userAddress, spenderAddress)

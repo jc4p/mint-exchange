@@ -30,7 +30,8 @@ export const FEE_BASIS_POINTS = 100 // 1% fee
 
 // Conduit configuration (default conduit)
 export const CONDUIT_KEY = '0x0000000000000000000000000000000000000000000000000000000000000000'
-export const CONDUIT_ADDRESS = '0x1E0049783F008A0085193E00003D00cd54003c71'
+// Default conduit address on Base chain (obtained from ConduitController.getConduit)
+export const CONDUIT_ADDRESS = '0xf9ed144bACaed98d0f3899B8B56c965D1A966D08'
 
 // Zone configuration (no zone for basic orders)
 export const ZONE_ADDRESS = '0x0000000000000000000000000000000000000000'

@@ -430,6 +430,16 @@ export class SeaportAdapter extends MarketplaceAdapter {
       return { hash }
     } catch (error) {
       console.error('Error fulfilling Seaport order:', error)
+      
+      // Check for common Seaport errors
+      if (error.message?.includes('0xeaf38844')) {
+        throw new Error('Invalid order signature. The order may have been modified or signed incorrectly.')
+      } else if (error.message?.includes('0x1a783b8d')) {
+        throw new Error('Order has already been filled or cancelled.')
+      } else if (error.message?.includes('0xf9c0959d')) {
+        throw new Error('Insufficient token approvals. Please check USDC and NFT approvals.')
+      }
+      
       throw error
     }
   }

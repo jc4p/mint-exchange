@@ -230,7 +230,7 @@ listings.get('/:id', async (c) => {
   }
 })
 
-import { getOrderHash } from '../utils/seaport.js'; // Import getOrderHash
+// Order hash is now provided by the client, no need to calculate it server-side
 
 // Create listing (protected route - requires auth)
 listings.post('/', authMiddleware(), async (c) => {
@@ -294,11 +294,11 @@ listings.post('/', authMiddleware(), async (c) => {
 
       const expiry = new Date(parseInt(orderParameters.endTime) * 1000).toISOString();
 
-      // Calculate order_hash
-      // Note: getOrderHash needs the Seaport contract address and chainId if it were to compute EIP-712 domain hash
-      // But for Seaport's internal getOrderHash, it's a direct hash of components.
-      // Assuming `getOrderHash` from `seaport.js` is designed for this.
-      const orderHash = getOrderHash(orderParameters);
+      // Use the order hash provided by the client (already calculated correctly)
+      const orderHash = body.orderHash;
+      if (!orderHash) {
+        return c.json({ error: 'Order hash is required for Seaport listings' }, 400);
+      }
 
       // Fetch metadata
       let metadata = body.metadata || {};

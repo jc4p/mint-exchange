@@ -162,6 +162,121 @@ export class EventIndexer {
       }
     }
   }
+
+  /**
+   * Clean up expired NFTExchange listings
+   * @param {number} checkLimit - Maximum number of active listings to check on-chain (default: 50)
+   */
+  async cleanupExpiredNFTExchangeListings(checkLimit = 50) {
+    try {
+      const startTime = Date.now()
+      
+      // First, mark expired listings in the database
+      const expiredResult = await this.env.DB.prepare(`
+        UPDATE listings 
+        SET cancelled_at = datetime('now'), 
+            cancel_tx_hash = 'auto_cancelled_expired'
+        WHERE contract_type = 'nft_exchange'
+        AND cancelled_at IS NULL
+        AND sold_at IS NULL
+        AND expiry < datetime('now')
+        AND blockchain_listing_id IS NOT NULL
+      `).run()
+      
+      const expiredCount = expiredResult.meta.changes
+      console.log(`Marked ${expiredCount} expired NFTExchange listings as cancelled`)
+      
+      // Now check on-chain status for active listings
+      const activeListings = await this.env.DB.prepare(`
+        SELECT id, blockchain_listing_id, seller_address, nft_contract, token_id
+        FROM listings
+        WHERE contract_type = 'nft_exchange'
+        AND blockchain_listing_id IS NOT NULL
+        AND cancelled_at IS NULL
+        AND sold_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT ?
+      `).bind(checkLimit).all()
+      
+      const NFT_EXCHANGE_ADDRESS = this.env.CONTRACT_ADDRESS || '0x06fB7424Ba65D587405b9C754Bc40dA9398B72F0'
+      const { parseAbi } = await import('viem')
+      const NFT_EXCHANGE_ABI = parseAbi([
+        'function listings(uint256) view returns (address seller, address nftContract, uint256 tokenId, uint256 price, uint256 expiresAt, bool isERC721, bool sold, bool cancelled)'
+      ])
+      
+      let soldCount = 0
+      let cancelledCount = 0
+      let notFoundCount = 0
+      
+      for (const listing of activeListings.results) {
+        try {
+          // Get on-chain listing data
+          const onChainListing = await this.blockchain.publicClient.readContract({
+            address: NFT_EXCHANGE_ADDRESS,
+            abi: NFT_EXCHANGE_ABI,
+            functionName: 'listings',
+            args: [BigInt(listing.blockchain_listing_id)]
+          })
+          
+          const [seller, nftContract, tokenId, price, expiresAt, isERC721, sold, cancelled] = onChainListing
+          
+          // Check if listing exists on-chain
+          if (seller === '0x0000000000000000000000000000000000000000') {
+            // Listing not found on-chain, mark as cancelled
+            await this.env.DB.prepare(`
+              UPDATE listings 
+              SET cancelled_at = datetime('now'), 
+                  cancel_tx_hash = 'auto_cancelled_not_found'
+              WHERE id = ?
+            `).bind(listing.id).run()
+            notFoundCount++
+          } else if (sold) {
+            // Mark as sold if not already
+            await this.env.DB.prepare(`
+              UPDATE listings 
+              SET sold_at = datetime('now'), 
+                  buyer_address = '0x0000000000000000000000000000000000000000',
+                  sale_tx_hash = 'auto_marked_sold'
+              WHERE id = ?
+            `).bind(listing.id).run()
+            soldCount++
+          } else if (cancelled) {
+            // Mark as cancelled if not already
+            await this.env.DB.prepare(`
+              UPDATE listings 
+              SET cancelled_at = datetime('now'), 
+                  cancel_tx_hash = 'auto_marked_cancelled'
+              WHERE id = ?
+            `).bind(listing.id).run()
+            cancelledCount++
+          }
+        } catch (error) {
+          console.error(`Error checking listing ${listing.id}:`, error.message)
+        }
+      }
+      
+      const runtime = Date.now() - startTime
+      
+      return {
+        runtime: `${runtime}ms`,
+        expired: expiredCount,
+        soldOnChain: soldCount,
+        cancelledOnChain: cancelledCount,
+        notFoundOnChain: notFoundCount,
+        checked: activeListings.results.length
+      }
+    } catch (error) {
+      console.error('Error cleaning up NFTExchange listings:', error)
+      return {
+        error: error.message,
+        expired: 0,
+        soldOnChain: 0,
+        cancelledOnChain: 0,
+        notFoundOnChain: 0,
+        checked: 0
+      }
+    }
+  }
 }
 
 /**
@@ -174,6 +289,7 @@ export default {
 
     const indexer = new EventIndexer(env)
     try {
+      // First, run the blockchain event indexing
       const result = await indexer.indexEvents()
       console.log('Indexing complete:', {
         blocksProcessed: result.processed,
@@ -185,12 +301,17 @@ export default {
       if (result.blocksRemaining > 0) {
         console.log(`Note: ${result.blocksRemaining} blocks remaining. Will continue in next run.`)
       }
+      
+      // Then clean up expired NFTExchange listings
+      const cleanupResult = await indexer.cleanupExpiredNFTExchangeListings()
+      console.log('NFTExchange cleanup complete:', cleanupResult)
+      
       return new Response(
-        JSON.stringify(result),
+        JSON.stringify({ indexing: result, cleanup: cleanupResult }),
         { headers: { 'Content-Type': 'application/json' } }
       )
     } catch (error) {
-      console.error('Scheduled indexing failed:', error.message)
+      console.error('Scheduled task failed:', error.message)
       return new Response(
         JSON.stringify({ error: error.message }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
