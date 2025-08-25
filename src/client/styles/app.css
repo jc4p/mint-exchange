@@ -8,3 +8,23 @@
 @import './components/nft-grid.css';
 @import './components/profile.css';
 @import './components/listing-details.css';
+
+/* Collections Link Container */
+.collections-link-container {
+  text-align: center;
+  padding: 16px 0;
+  margin-top: 16px;
+}
+
+.see-all-collections {
+  color: var(--primary-blue);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+
+.see-all-collections:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}

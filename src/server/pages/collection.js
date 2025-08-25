@@ -21,7 +21,7 @@ export async function collectionPage(c) {
                 <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
                   <h2 style="color: var(--text-primary); margin-bottom: 1rem;">Collection Not Found</h2>
                   <p>No active listings found for this collection.</p>
-                  <a href="/" style="color: var(--primary-color); text-decoration: none; margin-top: 1rem; display: inline-block;">
+                  <a href="#" style="color: var(--primary-color); text-decoration: none; margin-top: 1rem; display: inline-block;" onclick="event.preventDefault(); window.history.back();">
                     ← Back to Home
                   </a>
                 </div>
@@ -55,7 +55,7 @@ export async function collectionPage(c) {
           <frame-provider>
             <main class="main-content collection-page">
               <div class="collection-header-section">
-                <a href="/" class="back-link">← Back</a>
+                <a href="#" class="back-link" onclick="event.preventDefault(); window.history.back();">← Back</a>
                 <h1 class="collection-title">${result.collection_name}</h1>
                 <p class="collection-subtitle">${result.pagination.total} active listings</p>
               </div>
@@ -279,7 +279,7 @@ export async function collectionPage(c) {
               <div style="text-align: center; padding: 60px 20px; color: var(--text-secondary);">
                 <h2 style="color: var(--text-primary); margin-bottom: 1rem;">Error Loading Collection</h2>
                 <p>Failed to load collection data. Please try again.</p>
-                <a href="/" style="color: var(--primary-color); text-decoration: none; margin-top: 1rem; display: inline-block;">
+                <a href="#" style="color: var(--primary-color); text-decoration: none; margin-top: 1rem; display: inline-block;" onclick="event.preventDefault(); window.history.back();">
                   ← Back to Home
                 </a>
               </div>

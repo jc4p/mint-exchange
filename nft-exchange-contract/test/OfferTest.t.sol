@@ -7,6 +7,10 @@ import {MockERC721} from "./mocks/MockERC721.sol";
 import {MockERC1155} from "./mocks/MockERC1155.sol";
 import {MockUSDC} from "./mocks/MockUSDC.sol";
 
+contract InvalidContract {
+    // Empty contract that doesn't implement any NFT standard
+}
+
 contract OfferTest is Test {
     NFTExchange exchange;
     MockERC721 erc721;
@@ -122,10 +126,13 @@ contract OfferTest is Test {
     }
 
     function testMakeOfferFailsWithInvalidNFT() public {
+        // Use a truly invalid contract that doesn't implement NFT standards
+        address invalidContract = address(new InvalidContract());
+        
         vm.prank(bob);
         vm.expectRevert(NFTExchange.UnsupportedNFTStandard.selector);
         exchange.makeOffer(
-            address(usdc),
+            invalidContract,
             0,
             offerAmount,
             offerDuration

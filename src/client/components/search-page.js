@@ -10,7 +10,29 @@ export class SearchPage extends BaseElement {
       searchResults: [],
       loading: false,
       hasSearched: false,
-      sortBy: 'recent' // recent, price_low, price_high
+      sortBy: 'recent', // recent, price_low, price_high
+      topCollections: [],
+      collectionsLoading: true
+    }
+  }
+  
+  async connectedCallback() {
+    super.connectedCallback()
+    // Fetch top collections when component is connected
+    await this.fetchTopCollections()
+  }
+  
+  async fetchTopCollections() {
+    try {
+      const response = await fetch('/api/listings/collections?limit=24')
+      const data = await response.json()
+      this.setState({ 
+        topCollections: data.collections || [],
+        collectionsLoading: false 
+      })
+    } catch (error) {
+      console.error('Failed to fetch top collections:', error)
+      this.setState({ collectionsLoading: false })
     }
   }
 
@@ -288,10 +310,75 @@ export class SearchPage extends BaseElement {
           0% { background-position: 200% 0; }
           100% { background-position: -200% 0; }
         }
+        
+        /* Collections Grid */
+        .collections-section {
+          padding: 16px;
+        }
+        
+        .section-header {
+          margin: 0 0 16px 0;
+          color: #0d141c;
+          font-size: 20px;
+          font-weight: 600;
+        }
+        
+        .collections-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 16px;
+        }
+        
+        .collection-card {
+          background: white;
+          border: 1px solid #cedbe8;
+          border-radius: 12px;
+          overflow: hidden;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        
+        .collection-card:hover {
+          border-color: #b8c9dd;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+          transform: translateY(-2px);
+        }
+        
+        .collection-image {
+          width: 100%;
+          aspect-ratio: 1;
+          background-size: cover;
+          background-position: center;
+          background-color: #e7edf4;
+        }
+        
+        .collection-info {
+          padding: 12px;
+        }
+        
+        .collection-name {
+          color: #0d141c;
+          font-size: 16px;
+          font-weight: 600;
+          margin: 0 0 8px 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        
+        .collection-stats {
+          display: flex;
+          align-items: center;
+        }
+        
+        .collection-count {
+          color: #49739c;
+          font-size: 14px;
+        }
       </style>
     `
 
-    const { searchQuery, searchResults, loading, hasSearched, sortBy } = this._state
+    const { searchQuery, searchResults, loading, hasSearched, sortBy, topCollections, collectionsLoading } = this._state
 
     this.shadowRoot.innerHTML = `
       ${styles}
@@ -361,15 +448,47 @@ export class SearchPage extends BaseElement {
               <p class="empty-text">Try searching with different keywords</p>
             </div>
           `}
+        ` : collectionsLoading ? `
+          <div class="skeleton-grid">
+            ${[...Array(6)].map(() => `
+              <div class="skeleton-card">
+                <div class="skeleton-image"></div>
+                <div class="skeleton-info">
+                  <div class="skeleton-text title"></div>
+                  <div class="skeleton-text price"></div>
+                  <div class="skeleton-text seller"></div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
         ` : `
-          <div class="empty-state">
-            <div class="empty-icon">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 256 256">
-                <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"></path>
-              </svg>
-            </div>
-            <h3 class="empty-title">Search for NFTs</h3>
-            <p class="empty-text">Find NFTs by name or collection</p>
+          <div class="collections-section">
+            <h2 class="section-header">Top Collections</h2>
+            ${topCollections.length > 0 ? `
+              <div class="collections-grid">
+                ${topCollections.map(collection => `
+                  <div class="collection-card" data-contract="${collection.contractAddress}">
+                    <div class="collection-image" style="background-image: url('${collection.image || '/placeholder.png'}')"></div>
+                    <div class="collection-info">
+                      <h3 class="collection-name">${collection.name}</h3>
+                      <div class="collection-stats">
+                        <span class="collection-count">${collection.listingCount} ${collection.listingCount === 1 ? 'item' : 'items'}</span>
+                      </div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : `
+              <div class="empty-state">
+                <div class="empty-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 256 256">
+                    <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"></path>
+                  </svg>
+                </div>
+                <h3 class="empty-title">No Collections Found</h3>
+                <p class="empty-text">Start listing NFTs to see collections here</p>
+              </div>
+            `}
           </div>
         `}
       </div>
@@ -416,6 +535,16 @@ export class SearchPage extends BaseElement {
         const listingId = e.currentTarget.dataset.id
         // Navigate to listing detail page
         window.location.href = `/listing/${listingId}`
+      })
+    })
+    
+    // Collection cards
+    const collectionCards = this.shadowRoot.querySelectorAll('.collection-card')
+    collectionCards.forEach(card => {
+      this.on(card, 'click', (e) => {
+        const contractAddress = e.currentTarget.dataset.contract
+        // Navigate to collection page
+        window.location.href = `/collection/${contractAddress}`
       })
     })
   }

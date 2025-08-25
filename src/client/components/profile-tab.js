@@ -13,10 +13,11 @@ export class ProfileTab extends BaseElement {
       nfts: [],
       listings: [],
       purchases: [],
+      sales: [],
       stats: null,
       loading: true,
       contentLoading: true, // Separate loading state for NFT content
-      activeView: 'owned', // 'owned', 'listings', 'purchases'
+      activeView: 'owned', // 'owned', 'listings', 'purchases', 'sales'
       nftsPage: 1,
       nftsPerPage: 12,
       totalNfts: 0
@@ -113,6 +114,7 @@ export class ProfileTab extends BaseElement {
         this.fetchUserNFTs(),
         this.fetchUserListings(),
         this.fetchUserPurchases(),
+        this.fetchUserSales(),
         this.fetchUserStats()
       ]).then(() => {
         this.setState({ contentLoading: false })
@@ -191,6 +193,29 @@ export class ProfileTab extends BaseElement {
     }
   }
 
+  async fetchUserSales() {
+    try {
+      // Fetch sold listings for this user (where they were the seller)
+      const url = window.authToken 
+        ? '/api/listings/me?status=sold'
+        : `/api/listings?seller_fid=${this._state.fid}&status=sold`
+      
+      const headers = window.authToken 
+        ? { 'Authorization': `Bearer ${window.authToken}` }
+        : {}
+        
+      const response = await fetch(url, { headers })
+      const data = await response.json()
+      console.log('Fetched sold listings:', data)
+      
+      // The listings endpoint returns sold listings directly
+      this.setState({ sales: data.listings || [] })
+    } catch (error) {
+      console.error('Failed to fetch sales:', error)
+      this.setState({ sales: [] })
+    }
+  }
+
   async fetchUserStats() {
     try {
       // If we have auth token, use /me endpoint
@@ -204,6 +229,15 @@ export class ProfileTab extends BaseElement {
         
       const response = await fetch(url, { headers })
       const data = await response.json()
+      console.log('Fetched stats:', data)
+      console.log('FID used for stats:', this._state.fid)
+      
+      // Debug: Check sales data when stats show 0
+      if (data.total_sales === 0 && this._state.sales.length > 0) {
+        console.log('Stats show 0 sales but we have sales data:', this._state.sales)
+        console.log('First sale seller_fid:', this._state.sales[0]?.seller_fid)
+      }
+      
       this.setState({ stats: data })
     } catch (error) {
       console.error('Failed to fetch stats:', error)
@@ -503,6 +537,10 @@ export class ProfileTab extends BaseElement {
           margin: 0;
         }
         
+        .listing-card.sold .listing-price {
+          color: #10b981;
+        }
+        
         .listing-actions {
           display: flex;
           gap: 8px;
@@ -551,6 +589,7 @@ export class ProfileTab extends BaseElement {
           border: 1px solid #cedbe8;
           border-radius: 8px;
           transition: all 0.2s;
+          cursor: pointer;
         }
         
         .purchase-card:hover {
@@ -770,6 +809,7 @@ export class ProfileTab extends BaseElement {
         
         <div class="stats-container">
           <div class="skeleton-stat"></div>
+          <div class="skeleton-stat"></div>
         </div>
         
         <div class="tabs-container">
@@ -779,6 +819,9 @@ export class ProfileTab extends BaseElement {
             </button>
             <button class="tab" disabled>
               <p class="tab-label">Listings</p>
+            </button>
+            <button class="tab" disabled>
+              <p class="tab-label">Sales</p>
             </button>
             <button class="tab" disabled>
               <p class="tab-label">Purchases</p>
@@ -793,7 +836,7 @@ export class ProfileTab extends BaseElement {
       return
     }
 
-    const { fid, nfts, listings, purchases, stats, activeView, user, nftsPage, contentLoading } = this._state
+    const { fid, nfts, listings, purchases, sales, stats, activeView, user, nftsPage, contentLoading } = this._state
     const avatarUrl = this.getAvatarUrl()
     const paginatedNfts = this.getPaginatedNfts()
     const totalPages = this.getTotalPages()
@@ -816,6 +859,10 @@ export class ProfileTab extends BaseElement {
           <p class="stat-value">${stats?.active_listings || 0}</p>
           <p class="stat-label">Active Listings</p>
         </div>
+        <div class="stat-card">
+          <p class="stat-value">${stats?.total_sales || 0}</p>
+          <p class="stat-label">Total Sales</p>
+        </div>
       </div>
       
       <div class="tabs-container">
@@ -825,6 +872,9 @@ export class ProfileTab extends BaseElement {
           </button>
           <button class="tab ${activeView === 'listings' ? 'active' : ''}" data-view="listings">
             <p class="tab-label">Listings</p>
+          </button>
+          <button class="tab ${activeView === 'sales' ? 'active' : ''}" data-view="sales">
+            <p class="tab-label">Sales</p>
           </button>
           <button class="tab ${activeView === 'purchases' ? 'active' : ''}" data-view="purchases">
             <p class="tab-label">Purchases</p>
@@ -911,19 +961,48 @@ export class ProfileTab extends BaseElement {
               <p class="empty-text">Your NFT listings will appear here</p>
             </div>
           `}
-        ` : `
-          ${purchases.length > 0 ? `
-            <div class="purchases-container">
-              ${purchases.map(purchase => `
-                <div class="purchase-card">
-                  <div class="purchase-image" style="background-image: url('${purchase.metadata?.image_url || '/placeholder.png'}')"></div>
-                  <div class="purchase-info">
-                    <h3 class="purchase-title">${purchase.metadata?.nft_name || 'NFT'}</h3>
-                    <p class="purchase-price">${purchase.metadata?.price || '0'} USDC</p>
-                    <p class="purchase-date">${this.formatDate(purchase.created_at)}</p>
+        ` : activeView === 'sales' ? `
+          ${sales.length > 0 ? `
+            <div class="listings-container">
+              ${sales.map(sale => `
+                <div class="listing-card sold" data-id="${sale.id}">
+                  <div class="listing-image" style="background-image: url('${sale.image || '/placeholder.png'}')"></div>
+                  <div class="listing-info">
+                    <h3 class="listing-title">${sale.name}</h3>
+                    <p class="listing-price">Sold for ${sale.price} USDC</p>
+                    <p class="purchase-date">${this.formatDate(sale.sold_at)}</p>
                   </div>
                 </div>
               `).join('')}
+            </div>
+          ` : `
+            <div class="empty-state">
+              <div class="empty-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 256 256">
+                  <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm40-68a28,28,0,0,1-28,28h-4v8a8,8,0,0,1-16,0v-8H104a8,8,0,0,1,0-16h36a12,12,0,0,0,0-24H116a28,28,0,0,1,0-56h4V72a8,8,0,0,1,16,0v8h16a8,8,0,0,1,0,16H116a12,12,0,0,0,0,24h24A28,28,0,0,1,168,148Z"></path>
+                </svg>
+              </div>
+              <h3 class="empty-title">No sales yet</h3>
+              <p class="empty-text">Your sold NFTs will appear here</p>
+            </div>
+          `}
+        ` : `
+          ${purchases.length > 0 ? `
+            <div class="purchases-container">
+              ${purchases.map(purchase => {
+                // Parse metadata if it's a string
+                const metadata = typeof purchase.metadata === 'string' ? JSON.parse(purchase.metadata) : purchase.metadata;
+                return `
+                  <div class="purchase-card" data-listing-id="${metadata?.listing_id || ''}" data-contract="${purchase.nft_contract}" data-token="${purchase.token_id}">
+                    <div class="purchase-image" style="background-image: url('${purchase.image_url || '/placeholder.png'}')"></div>
+                    <div class="purchase-info">
+                      <h3 class="purchase-title">${purchase.nft_name || `Token #${purchase.token_id}`}</h3>
+                      <p class="purchase-price">${purchase.price || '0'} USDC</p>
+                      <p class="purchase-date">${this.formatDate(purchase.created_at)}</p>
+                    </div>
+                  </div>
+                `
+              }).join('')}
             </div>
           ` : `
             <div class="empty-state">
@@ -946,10 +1025,13 @@ export class ProfileTab extends BaseElement {
     const tabs = this.shadowRoot.querySelectorAll('.tab')
     console.log('Found tabs:', tabs.length)
     tabs.forEach(tab => {
-      this.on(tab, 'click', (e) => {
+      this.on(tab, 'click', async (e) => {
         const view = e.currentTarget.dataset.view
         console.log('Tab clicked:', view)
-        this.setState({ activeView: view, nftsPage: 1 }) // Reset to page 1 when switching tabs
+        this.setState({ activeView: view, nftsPage: 1, contentLoading: true }) // Reset to page 1 when switching tabs
+        
+        // No need to fetch data anymore since we fetch everything upfront
+        this.setState({ contentLoading: false })
       })
     })
 
@@ -1014,23 +1096,37 @@ export class ProfileTab extends BaseElement {
       })
     })
     
-    // Listing actions
-    // const listingButtons = this.shadowRoot.querySelectorAll('.listing-button')
-    // listingButtons.forEach(btn => {
-    //   this.on(btn, 'click', (e) => {
-    //     e.stopPropagation()
-    //     const action = e.currentTarget.dataset.action
-    //     const listingCard = e.currentTarget.closest('.listing-card')
-    //     const listingId = listingCard.dataset.id
-    //     const listing = this._state.listings.find(l => l.id === listingId)
+    // Click on purchase cards
+    const purchaseCards = this.shadowRoot.querySelectorAll('.purchase-card')
+    purchaseCards.forEach(card => {
+      this.on(card, 'click', (e) => {
+        const listingId = card.dataset.listingId
+        const contract = card.dataset.contract
+        const tokenId = card.dataset.token
         
-    //     if (action === 'cancel') {
-    //       this.cancelListing(listing)
-    //     } else if (action === 'edit') {
-    //       this.emit(EVENTS.EDIT_LISTING, { listing })
-    //     }
-    //   })
-    // })
+        if (listingId) {
+          // If we have the original listing ID, go to that listing
+          window.location.href = `/listing/${listingId}`
+        } else {
+          // Otherwise, search for this NFT in the marketplace
+          window.location.href = `/search?q=${contract}`
+        }
+      })
+    })
+    
+    // Click on sales cards - handle sold listings
+    const salesCards = this.shadowRoot.querySelectorAll('.listing-card.sold')
+    salesCards.forEach(card => {
+      this.on(card, 'click', (e) => {
+        const listingId = card.dataset.id
+        console.log('Sales card clicked, listing ID:', listingId)
+        
+        if (listingId) {
+          // Navigate to the listing details page
+          window.location.href = `/listing/${listingId}`
+        }
+      })
+    })
   }
 
   async cancelListing(listing) {

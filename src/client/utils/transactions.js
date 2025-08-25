@@ -132,9 +132,9 @@ export class TransactionManager {
   }
 
   /**
-   * Create a new listing (defaults to Seaport)
+   * Create a new listing
    */
-  async createListing(nftContract, tokenId, price, durationInDays, isERC1155 = false, useSeaport = true) {
+  async createListing(nftContract, tokenId, price, durationInDays, isERC1155 = false, useSeaport = false, contractType = null) {
     const { walletClient, publicClient, account } = await this.getViemClients()
     
     console.log('=== Starting createListing process ===')
@@ -152,8 +152,10 @@ export class TransactionManager {
     console.log('✅ Ownership confirmed')
 
     // Get the appropriate adapter
+    // If contractType is provided, use it. Otherwise fall back to useSeaport flag
+    const adapterType = contractType || (useSeaport ? 'seaport' : 'nft_exchange')
     const adapter = getMarketplaceAdapter(
-      useSeaport ? 'seaport' : 'nftexchange',
+      adapterType,
       walletClient,
       account,
       publicClient
@@ -194,25 +196,26 @@ export class TransactionManager {
         throw new Error('NFT approval is required to list on Seaport.')
       }
     } else {
-      // Original NFTExchange approval logic (remains conditional)
-      const isApproved = await checkNFTApproval(nftContract, tokenId, account, ADDRESSES.NFT_EXCHANGE, isERC1155)
+      // NFTExchange approval logic (v1 or v2)
+      const targetContract = adapterType === 'nft_exchange_v2' ? ADDRESSES.NFT_EXCHANGE_V2 : ADDRESSES.NFT_EXCHANGE
+      const isApproved = await checkNFTApproval(nftContract, tokenId, account, targetContract, isERC1155)
       if (!isApproved) {
-        console.log('NFT not approved for NFTExchange, sending approval transaction...')
+        console.log(`NFT not approved for ${adapterType}, sending approval transaction...`)
         let approveData
         if (isERC1155) {
-          approveData = encodeERC1155.setApprovalForAll(ADDRESSES.NFT_EXCHANGE, true)
+          approveData = encodeERC1155.setApprovalForAll(targetContract, true)
         } else {
-          approveData = encodeERC721.approve(ADDRESSES.NFT_EXCHANGE, tokenId)
+          approveData = encodeERC721.approve(targetContract, tokenId)
         }
         const approveTx = await this.sendTransaction(account, nftContract, approveData)
         await this.waitForTransaction(approveTx)
-        console.log('✅ NFT approved for NFTExchange successfully')
+        console.log(`✅ NFT approved for ${adapterType} successfully`)
       }
     }
 
     // Create the listing through the adapter
     console.log('Creating listing through adapter...')
-    console.log('Adapter type:', useSeaport ? 'Seaport' : 'NFTExchange')
+    console.log('Adapter type:', adapterType)
     console.log('Listing parameters:', {
       contract: nftContract,
       tokenId,
@@ -248,7 +251,15 @@ export class TransactionManager {
     const userAddress = await this.getWalletAddress()
     const amountInUSDC = toUSDCAmount(amount)
     // For Seaport, USDC needs to be approved to the conduit, not the Seaport contract
-    const spenderAddress = contractType === 'seaport' ? CONDUIT_ADDRESS : ADDRESSES.NFT_EXCHANGE
+    // For NFT Exchange V2, use the V2 address
+    let spenderAddress
+    if (contractType === 'seaport') {
+      spenderAddress = CONDUIT_ADDRESS
+    } else if (contractType === 'nft_exchange_v2') {
+      spenderAddress = ADDRESSES.NFT_EXCHANGE_V2
+    } else {
+      spenderAddress = ADDRESSES.NFT_EXCHANGE
+    }
     
     console.log('Approving USDC:', amount, 'USDC for', contractType, 'to address:', spenderAddress)
     
@@ -413,15 +424,16 @@ export class TransactionManager {
         await this.waitForTransaction(approveTx)
       }
     } else {
-      // Original NFTExchange approval logic
-      const isApproved = await checkNFTApproval(nftContract, tokenId, account, isERC1155)
+      // Original NFTExchange approval logic (v1 or v2)
+      const targetContract = contractType === 'nft_exchange_v2' ? ADDRESSES.NFT_EXCHANGE_V2 : ADDRESSES.NFT_EXCHANGE
+      const isApproved = await checkNFTApproval(nftContract, tokenId, account, targetContract, isERC1155)
       
       if (!isApproved) {
         let approveData
         if (isERC1155) {
-          approveData = encodeERC1155.setApprovalForAll(ADDRESSES.NFT_EXCHANGE, true)
+          approveData = encodeERC1155.setApprovalForAll(targetContract, true)
         } else {
-          approveData = encodeERC721.approve(ADDRESSES.NFT_EXCHANGE, tokenId)
+          approveData = encodeERC721.approve(targetContract, tokenId)
         }
         
         const approveTx = await this.sendTransaction(account, nftContract, approveData)

@@ -26,7 +26,7 @@ export function createRpcClient(env) {
  * Wait for a transaction to be available and get it
  * Retries up to maxAttempts times with a delay between attempts
  */
-export async function waitForAndGetTransaction(client, hash, maxAttempts = 10, delayMs = 200) {
+export async function waitForAndGetTransaction(client, hash, maxAttempts = 30, delayMs = 1000) {
   console.log(`Waiting for transaction ${hash} to be available...`)
   
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -40,8 +40,10 @@ export async function waitForAndGetTransaction(client, hash, maxAttempts = 10, d
         throw error
       }
       
-      console.log(`Transaction not found on attempt ${attempt}, retrying in ${delayMs}ms...`)
-      await new Promise(resolve => setTimeout(resolve, delayMs))
+      // Use exponential backoff for better retry strategy
+      const backoffMs = Math.min(delayMs * Math.pow(1.5, attempt - 1), 5000)
+      console.log(`Transaction not found on attempt ${attempt}, retrying in ${backoffMs}ms...`)
+      await new Promise(resolve => setTimeout(resolve, backoffMs))
     }
   }
 }
@@ -50,7 +52,7 @@ export async function waitForAndGetTransaction(client, hash, maxAttempts = 10, d
  * Wait for a transaction receipt to be available and get it
  * Retries up to maxAttempts times with a delay between attempts
  */
-export async function waitForAndGetTransactionReceipt(client, hash, maxAttempts = 25, delayMs = 400) {
+export async function waitForAndGetTransactionReceipt(client, hash, maxAttempts = 30, delayMs = 1000) {
   console.log(`Waiting for transaction receipt ${hash} to be available...`)
   
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -64,8 +66,10 @@ export async function waitForAndGetTransactionReceipt(client, hash, maxAttempts 
         throw error
       }
       
-      console.log(`Transaction receipt not found on attempt ${attempt}, retrying in ${delayMs}ms...`)
-      await new Promise(resolve => setTimeout(resolve, delayMs))
+      // Use exponential backoff for better retry strategy
+      const backoffMs = Math.min(delayMs * Math.pow(1.5, attempt - 1), 5000)
+      console.log(`Transaction receipt not found on attempt ${attempt}, retrying in ${backoffMs}ms...`)
+      await new Promise(resolve => setTimeout(resolve, backoffMs))
     }
   }
 }

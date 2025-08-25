@@ -8,6 +8,7 @@ export async function listingDetailsPage(c) {
   // Try to fetch listing details
   let listing = null
   let nftAttributes = []
+  let collectionCount = 0
   const db = c.env?.DB
   
   if (db) {
@@ -24,6 +25,21 @@ export async function listingDetailsPage(c) {
       `).bind(listingId).first()
       
       listing = result
+      
+      // Count other active listings in the same collection
+      if (listing && listing.nft_contract) {
+        const countResult = await db.prepare(`
+          SELECT COUNT(*) as count
+          FROM listings
+          WHERE nft_contract = ?
+            AND id != ?
+            AND sold_at IS NULL
+            AND cancelled_at IS NULL
+            AND expiry > datetime('now')
+        `).bind(listing.nft_contract.toLowerCase(), listingId).first()
+        
+        collectionCount = countResult.count || 0
+      }
       
       // Fetch complete metadata if missing or incomplete
       if (listing && (!listing.image_url || !listing.name || listing.metadata_uri)) {
@@ -139,7 +155,7 @@ export async function listingDetailsPage(c) {
           <main class="main-content">
             <div class="listing-header-section">
               <div class="listing-header-nav">
-                <a href="/" class="back-link">← Back</a>
+                <a href="#" class="back-link" onclick="event.preventDefault(); window.history.back();">← Back</a>
                 <button class="share-button" id="share-listing-btn" data-listing-id="${listing.id}" data-listing-name="${listing.name.replace(/"/g, '&quot;')}">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
@@ -200,6 +216,20 @@ export async function listingDetailsPage(c) {
                         </div>
                       </div>
                     </div>
+                    
+                    ${collectionCount > 0 ? `
+                      <div class="collection-link-section">
+                        <a href="/collection/${listing.nft_contract}" class="collection-link">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="3" width="7" height="7"></rect>
+                            <rect x="14" y="14" width="7" height="7"></rect>
+                            <rect x="3" y="14" width="7" height="7"></rect>
+                          </svg>
+                          See ${collectionCount} more from this collection
+                        </a>
+                      </div>
+                    ` : ''}
                     
                     ${nftAttributes.length > 0 ? `
                       <div class="listing-attributes">

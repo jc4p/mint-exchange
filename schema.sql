@@ -153,3 +153,26 @@ SELECT
   (SELECT COUNT(*) FROM offers WHERE buyer_fid = u.fid) as total_offers_made,
   (SELECT COUNT(*) FROM offers WHERE seller_fid = u.fid AND accepted_at IS NOT NULL) as total_offers_received
 FROM users u;
+
+-- Listing verification tracking table
+-- Tracks when listings were last verified on-chain to avoid checking the same ones repeatedly
+CREATE TABLE listing_verifications (
+    listing_id INTEGER PRIMARY KEY,
+    last_verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    verification_count INTEGER DEFAULT 1,
+    last_status TEXT, -- 'active', 'sold', 'cancelled', 'expired', 'not_found', 'error'
+    FOREIGN KEY (listing_id) REFERENCES listings(id) ON DELETE CASCADE
+);
+
+-- Create index for efficient querying
+CREATE INDEX idx_verification_time ON listing_verifications(last_verified_at);
+
+-- View to make querying easier
+CREATE VIEW listings_with_verification AS
+SELECT 
+    l.*,
+    lv.last_verified_at,
+    lv.verification_count,
+    lv.last_status as last_verification_status
+FROM listings l
+LEFT JOIN listing_verifications lv ON l.id = lv.listing_id;

@@ -118,17 +118,14 @@ export class ListingDetails extends BaseElement {
       const shareText = `Check out this auction on Mint Exchange: ${listingName}`
       const shareUrl = `${window.location.origin}/listing/${listingId}`
       
-      // Create Warpcast compose URL
-      const composeUrl = `https://warpcast.com/~/compose?text=${encodeURIComponent(shareText)}&embeds[]=${encodeURIComponent(shareUrl)}`
+      // Import FrameProvider class to use its static composeCast method
+      const { FrameProvider } = await import('./frame-provider.js')
       
-      // Get frame provider to use openUrl
-      const frameProvider = document.querySelector('frame-provider')
-      if (frameProvider && frameProvider.constructor.openUrl) {
-        await frameProvider.constructor.openUrl(composeUrl)
-      } else {
-        // Fallback to regular window.open if not in frame
-        window.open(composeUrl, '_blank')
-      }
+      // Use the static composeCast method directly
+      await FrameProvider.composeCast({
+        text: shareText,
+        embeds: [shareUrl]
+      })
     } catch (error) {
       console.error('Error sharing:', error)
       await showAlert('Unable to share. Please try again.', 'Share Failed')
@@ -246,8 +243,9 @@ export class ListingDetails extends BaseElement {
         }
         cancelTxHash = await transactionManager.cancelListing(listing.orderData.parameters, 'seaport')
       } else {
-        // For NFTExchange, use the blockchain listing ID
-        cancelTxHash = await transactionManager.cancelListing(listing.blockchainListingId, 'nft_exchange')
+        // For NFTExchange, use the blockchain listing ID and contract type
+        const contractType = listing.contractType || 'nft_exchange'
+        cancelTxHash = await transactionManager.cancelListing(listing.blockchainListingId, contractType)
       }
 
       // Notify backend immediately about the cancellation

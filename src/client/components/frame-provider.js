@@ -172,13 +172,44 @@ export class FrameProvider extends BaseElement {
       console.error('Cannot view profile outside Frame context')
     }
   }
+
+  static async composeCast({ text, embeds, parent, close, channelKey }) {
+    try {
+      // Use the Farcaster SDK's composeCast action
+      const result = await frame.sdk.actions.composeCast({
+        text,
+        embeds,
+        parent,
+        close,
+        channelKey
+      })
+      return result
+    } catch (error) {
+      // Fallback to Farcaster compose URL if not in frame context
+      console.log('Not in frame context, falling back to Farcaster URL')
+      const params = new URLSearchParams()
+      if (text) params.append('text', text)
+      if (embeds && embeds.length > 0) {
+        embeds.forEach(embed => params.append('embeds[]', embed))
+      }
+      if (channelKey) params.append('channelKey', channelKey)
+      
+      const composeUrl = `https://farcaster.xyz/~/compose?${params.toString()}`
+      window.open(composeUrl, '_blank')
+      return null
+    }
+  }
 }
 
 customElements.define('frame-provider', FrameProvider)
+
+// Export the class for direct access to static methods
+export { FrameProvider }
 
 // Export utilities
 export const frameUtils = {
   sdk: frame.sdk,
   openUrl: FrameProvider.openUrl,
-  viewProfile: FrameProvider.viewProfile
+  viewProfile: FrameProvider.viewProfile,
+  composeCast: FrameProvider.composeCast
 }

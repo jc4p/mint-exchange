@@ -17,15 +17,28 @@ listings.get('/me', authMiddleware(), async (c) => {
     const page = parseInt(c.req.query('page') || '1')
     const limit = parseInt(c.req.query('limit') || '20')
     const sort = c.req.query('sort') || 'recent'
-    console.log('Query params:', { page, limit, sort })
+    const status = c.req.query('status') || 'active'
+    console.log('Query params:', { page, limit, sort, status })
     
-    const result = await db.getActiveListings({ 
-      page, 
-      limit, 
-      sort, 
-      sellerFid: user.fid, 
-      search: null 
-    })
+    let result
+    if (status === 'sold') {
+      // Get sold listings for this user
+      result = await db.getUserSoldListings({ 
+        page, 
+        limit, 
+        sort, 
+        sellerFid: user.fid 
+      })
+    } else {
+      // Get active listings (default)
+      result = await db.getActiveListings({ 
+        page, 
+        limit, 
+        sort, 
+        sellerFid: user.fid, 
+        search: null 
+      })
+    }
     console.log('Database result:', { 
       listingCount: result.listings.length, 
       pagination: result.pagination 
@@ -50,7 +63,8 @@ listings.get('/me', authMiddleware(), async (c) => {
       },
       listedAt: listing.created_at,
       expiresAt: listing.expiry,
-      txHash: listing.tx_hash
+      txHash: listing.tx_hash,
+      sold_at: listing.sold_at
     }))
     
     return c.json({
@@ -61,6 +75,63 @@ listings.get('/me', authMiddleware(), async (c) => {
     console.error('❌ Error fetching user listings:', error)
     console.error('Stack trace:', error.stack)
     return c.json({ error: 'Failed to fetch your listings' }, 500)
+  }
+})
+
+// Get top collections by listing count
+listings.get('/collections', async (c) => {
+  console.log('=== GET /api/listings/collections ===')
+  try {
+    const db = new Database(c.env.DB)
+    const limit = parseInt(c.req.query('limit') || '12')
+    
+    // Query to get top collections by active listing count
+    // Using a subquery to get the image of the highest priced NFT in each collection
+    const query = `
+      SELECT 
+        l.nft_contract,
+        COUNT(*) as listing_count,
+        MIN(l.price) as floor_price,
+        MAX(l.price) as ceiling_price,
+        (
+          SELECT image_url 
+          FROM listings l2 
+          WHERE l2.nft_contract = l.nft_contract 
+            AND l2.sold_at IS NULL 
+            AND l2.cancelled_at IS NULL 
+            AND l2.expiry > datetime('now')
+          ORDER BY l2.price DESC 
+          LIMIT 1
+        ) as collection_image,
+        MAX(l.name) as sample_name
+      FROM listings l
+      WHERE l.sold_at IS NULL 
+        AND l.cancelled_at IS NULL 
+        AND l.expiry > datetime('now')
+      GROUP BY l.nft_contract
+      ORDER BY listing_count DESC
+      LIMIT ?
+    `
+    
+    const results = await db.db
+      .prepare(query)
+      .bind(limit)
+      .all()
+    
+    // Transform results to include collection name (derived from contract address or sample NFT name)
+    const collections = results.results.map(collection => ({
+      contractAddress: collection.nft_contract,
+      name: collection.sample_name ? collection.sample_name.replace(/\s*#\d+$/, '') : `Collection ${collection.nft_contract.slice(0, 6)}...`,
+      listingCount: collection.listing_count,
+      floorPrice: collection.floor_price,
+      ceilingPrice: collection.ceiling_price,
+      image: collection.collection_image || '/placeholder.png'
+    }))
+    
+    return c.json({ collections })
+  } catch (error) {
+    console.error('❌ Error fetching collections:', error)
+    return c.json({ error: 'Failed to fetch collections' }, 500)
   }
 })
 
@@ -75,10 +146,18 @@ listings.get('/', async (c) => {
     const sellerFid = c.req.query('seller_fid') ? parseInt(c.req.query('seller_fid')) : null
     const search = c.req.query('search')
     const contractType = c.req.query('contract_type') // Added contract_type
+    const status = c.req.query('status') || 'active'
     
-    console.log('Query params:', { page, limit, sort, sellerFid, search, contractType })
+    console.log('Query params:', { page, limit, sort, sellerFid, search, contractType, status })
     
-    const result = await db.getActiveListings({ page, limit, sort, sellerFid, search, contractType })
+    let result
+    if (status === 'sold' && sellerFid) {
+      // Get sold listings for a specific seller
+      result = await db.getUserSoldListings({ page, limit, sort, sellerFid })
+    } else {
+      // Get active listings (default)
+      result = await db.getActiveListings({ page, limit, sort, sellerFid, search, contractType })
+    }
     console.log('Database query result:', {
       listingCount: result.listings.length,
       pagination: result.pagination
@@ -239,8 +318,8 @@ listings.post('/', authMiddleware(), async (c) => {
     const body = await c.req.json();
     const user = c.get('user'); // Authenticated user
 
-    // Assuming new listings are Seaport orders
-    const contractType = 'seaport'; // For now, default new listings to Seaport
+    // Get contract type from request body
+    const contractType = body.contractType || 'nft_exchange';
 
     if (contractType === 'seaport') {
       if (!body.orderParameters || typeof body.orderParameters !== 'object') {
@@ -335,10 +414,10 @@ listings.post('/', authMiddleware(), async (c) => {
       const createdListing = await db.getListing(result.meta.last_row_id);
       return c.json(createdListing);
 
-    } else { // Existing NFT_EXCHANGE logic (currently unreachable as we default to seaport)
-      // This path would need to be triggered by a different contract_type in body if supported
+    } else if (contractType === 'nft_exchange' || contractType === 'nft_exchange_v2') {
+      // Handle both NFTExchange v1 and v2
       if (!body.txHash) {
-        return c.json({ error: 'Transaction hash is required for nft_exchange listings' }, 400);
+        return c.json({ error: 'Transaction hash is required for NFTExchange listings' }, 400);
       }
       const { createRpcClient, waitForAndGetTransaction, waitForAndGetTransactionReceipt } = await import('../utils/rpc-client.js');
       const { parseAbi, decodeEventLog } = await import('viem');
@@ -349,8 +428,17 @@ listings.post('/', authMiddleware(), async (c) => {
       ]);
       const sellerAddress = tx.from;
       const NFT_EXCHANGE_EVENTS = parseAbi(['event ListingCreated(uint256 indexed listingId, address indexed seller, address indexed nftContract, uint256 tokenId, uint256 price, string metadataURI)']);
+      
+      // Determine which contract address to check based on contract type
+      const expectedContractAddress = contractType === 'nft_exchange_v2' 
+        ? c.env.NFT_EXCHANGE_V2_ADDRESS?.toLowerCase()
+        : c.env.CONTRACT_ADDRESS?.toLowerCase();
+      
       let blockchainListingId = null;
       for (const log of receipt.logs) {
+        // Check if this log is from the expected contract
+        if (log.address.toLowerCase() !== expectedContractAddress) continue;
+        
         try {
           const decoded = decodeEventLog({ abi: NFT_EXCHANGE_EVENTS, data: log.data, topics: log.topics, strict: false });
           if (decoded.eventName === 'ListingCreated' && decoded.args.nftContract.toLowerCase() === body.nftContract.toLowerCase() && decoded.args.tokenId.toString() === body.tokenId.toString()) {
@@ -367,13 +455,18 @@ listings.post('/', authMiddleware(), async (c) => {
          if (fetchedMetadata.success) metadata = { ...metadata, ...fetchedMetadata };
       }
 
+      // For v2 contracts, prefix the listing ID to avoid conflicts
+      const dbListingId = contractType === 'nft_exchange_v2' 
+        ? `v2_${blockchainListingId}`
+        : blockchainListingId;
+      
       const result = await db.createListing({
-        blockchain_listing_id: blockchainListingId,
+        blockchain_listing_id: dbListingId,
         seller_fid: user.fid, seller_address: sellerAddress,
         nft_contract: body.nftContract, token_id: body.tokenId, price: body.price, expiry: body.expiry,
         metadata_uri: metadata.metadata_uri || '', image_url: metadata.image_url || '',
         name: metadata.name || `Token #${body.tokenId}`, description: metadata.description || '',
-        tx_hash: body.txHash, contract_type: 'nft_exchange'
+        tx_hash: body.txHash, contract_type: contractType
       });
       const createdListing = await db.getListing(result.meta.last_row_id);
       return c.json(createdListing);
@@ -413,12 +506,12 @@ listings.delete('/:id', authMiddleware(), async (c) => {
     const { parseAbi, decodeEventLog } = await import('viem');
     const client = createRpcClient(c.env);
 
-    if (listing.contract_type === 'nft_exchange') {
+    if (listing.contract_type === 'nft_exchange' || listing.contract_type === 'nft_exchange_v2') {
       const tx = await waitForAndGetTransaction(client, finalTxHash);
       const cancellerAddress = tx.from;
-      // Ensure canceller from tx matches listing seller from db, or authenticated user if stricter
+      // Ensure canceller from tx matches listing seller from db
       if (cancellerAddress.toLowerCase() !== listing.seller_address.toLowerCase()){
-         return c.json({ error: 'Transaction sender does not match listing seller for nft_exchange type.' }, 403);
+         return c.json({ error: 'Transaction sender does not match listing seller.' }, 403);
       }
       await db.cancelListing(listing.blockchain_listing_id, cancellerAddress, finalTxHash);
     } else if (listing.contract_type === 'seaport') {
@@ -484,21 +577,34 @@ listings.post('/:id/cancel', authMiddleware(), async (c) => {
 
     if (receipt.status !== 'success') return c.json({ error: 'Transaction failed' }, 400);
 
-    if (listing.contract_type === 'nft_exchange') {
+    if (listing.contract_type === 'nft_exchange' || listing.contract_type === 'nft_exchange_v2') {
       console.log('Processing NFTExchange cancellation, looking for ListingCancelled event');
       console.log('Expected blockchain_listing_id:', listing.blockchain_listing_id);
-      console.log('NFTExchange contract address:', c.env.CONTRACT_ADDRESS);
+      console.log('Contract type:', listing.contract_type);
+      
+      // Use appropriate contract address based on version
+      const contractAddress = listing.contract_type === 'nft_exchange_v2' 
+        ? c.env.NFT_EXCHANGE_V2_ADDRESS 
+        : c.env.CONTRACT_ADDRESS;
+      
+      console.log('NFTExchange contract address:', contractAddress);
       console.log('Receipt logs count:', receipt.logs.length);
       
       const NFT_EXCHANGE_EVENTS = parseAbi(['event ListingCancelled(uint256 indexed listingId)']);
       let eventFound = false;
+      
+      // For v2, we need to strip the v2_ prefix to get the actual on-chain listing ID
+      const onChainListingId = listing.blockchain_listing_id.startsWith('v2_') 
+        ? listing.blockchain_listing_id.substring(3)
+        : listing.blockchain_listing_id;
+      
       for (const log of receipt.logs) {
         console.log('Checking log from address:', log.address);
-        if (log.address.toLowerCase() !== c.env.CONTRACT_ADDRESS?.toLowerCase()) continue;
+        if (log.address.toLowerCase() !== contractAddress?.toLowerCase()) continue;
         try {
           const decoded = decodeEventLog({ abi: NFT_EXCHANGE_EVENTS, data: log.data, topics: log.topics, eventName: 'ListingCancelled', strict: false });
           console.log('Decoded ListingCancelled event:', decoded.args);
-          if (decoded && decoded.args && decoded.args.listingId.toString() === listing.blockchain_listing_id) {
+          if (decoded && decoded.args && decoded.args.listingId.toString() === onChainListingId) {
             await db.cancelListing(listing.blockchain_listing_id, listing.seller_address, body.txHash);
             eventFound = true;
             break;
@@ -508,7 +614,7 @@ listings.post('/:id/cancel', authMiddleware(), async (c) => {
         }
       }
       if (!eventFound) {
-        console.log('ListingCancelled event not found for listing ID:', listing.blockchain_listing_id);
+        console.log('ListingCancelled event not found for listing ID:', onChainListingId);
         return c.json({ error: 'NFTExchange ListingCancelled event not found or ID mismatch' }, 400);
       }
     } else if (listing.contract_type === 'seaport') {
@@ -560,98 +666,6 @@ listings.post('/:id/cancel', authMiddleware(), async (c) => {
   }
 })
 
-// Record purchase (protected route)
-listings.post('/:id/purchase', authMiddleware(), async (c) => {
-  try {
-    const db = new Database(c.env.DB)
-    const user = c.get('user')
-    const listingId = c.req.param('id')
-    const body = await c.req.json()
-    
-    // txHash is required
-    if (!body.txHash) {
-      return c.json({ error: 'Transaction hash is required' }, 400)
-    }
-    
-    // Get listing to verify it exists
-    const listing = await db.getListing(listingId)
-    if (!listing) {
-      return c.json({ error: 'Listing not found' }, 404)
-    }
-    
-    // Import necessary utilities
-    const { createRpcClient, waitForAndGetTransactionReceipt } = await import('../utils/rpc-client.js')
-    const { parseAbi, decodeEventLog } = await import('viem')
-    const client = createRpcClient(c.env)
-    
-    // Wait for transaction receipt
-    console.log('Waiting for purchase transaction:', body.txHash)
-    const receipt = await waitForAndGetTransactionReceipt(client, body.txHash)
-    
-    if (receipt.status !== 'success') {
-      return c.json({ error: 'Transaction failed' }, 400)
-    }
-    
-    // Define the ListingSold event ABI
-    const NFT_EXCHANGE_EVENTS = parseAbi([
-      'event ListingSold(uint256 indexed listingId, address indexed buyer, uint256 price)'
-    ])
-    
-    // Find and validate the ListingSold event
-    let purchaseEvent = null
-    for (const log of receipt.logs) {
-      try {
-        const decoded = decodeEventLog({
-          abi: NFT_EXCHANGE_EVENTS,
-          data: log.data,
-          topics: log.topics,
-          strict: false
-        })
-        
-        if (decoded.eventName === 'ListingSold') {
-          // Verify this is for the correct listing
-          if (decoded.args.listingId.toString() === listing.blockchain_listing_id) {
-            purchaseEvent = decoded.args
-            break
-          }
-        }
-      } catch (e) {
-        // Skip non-matching events
-      }
-    }
-    
-    if (!purchaseEvent) {
-      return c.json({ error: 'ListingSold event not found or listing ID mismatch' }, 400)
-    }
-    
-    // Extract buyer address from event
-    const buyerAddress = purchaseEvent.buyer
-    
-    // Verify the authenticated user is the buyer
-    if (user.wallet_address && buyerAddress.toLowerCase() !== user.wallet_address.toLowerCase()) {
-      return c.json({ error: 'Transaction buyer does not match authenticated user' }, 403)
-    }
-    
-    // Process the purchase immediately
-    console.log('Processing purchase for listing:', listing.blockchain_listing_id)
-    
-    // Resolve buyer FID if not already known
-    let buyerFid = user.fid
-    
-    // Mark listing as sold in database
-    await db.markListingSold(
-      listing.blockchain_listing_id, 
-      buyerAddress, 
-      buyerFid, 
-      body.txHash
-    )
-    
-    return c.json({ success: true, message: 'Cancellation recorded successfully' });
-  } catch (error) {
-    console.error('Error recording cancellation:', error);
-    return c.json({ error: `Failed to record cancellation: ${error.message}` }, 500);
-  }
-});
 
 // Record purchase (protected route) - Unified
 listings.post('/:id/purchase', authMiddleware(), async (c) => {
@@ -679,14 +693,24 @@ listings.post('/:id/purchase', authMiddleware(), async (c) => {
 
     let buyerActualAddress; // Address of the buyer from the event
 
-    if (listing.contract_type === 'nft_exchange') {
+    if (listing.contract_type === 'nft_exchange' || listing.contract_type === 'nft_exchange_v2') {
       const NFT_EXCHANGE_EVENTS = parseAbi(['event ListingSold(uint256 indexed listingId, address indexed buyer, uint256 price)']);
       let eventFound = false;
+      // Determine which contract address to check based on contract type
+      const expectedContractAddress = listing.contract_type === 'nft_exchange_v2' 
+        ? (c.env.NFT_EXCHANGE_V2_ADDRESS || '0x9D045156E07DCe3F518ea531fD67cC085106292B')
+        : c.env.CONTRACT_ADDRESS;
+      
       for (const log of receipt.logs) {
-        if (log.address.toLowerCase() !== c.env.CONTRACT_ADDRESS?.toLowerCase()) continue;
+        if (log.address.toLowerCase() !== expectedContractAddress?.toLowerCase()) continue;
         try {
           const decoded = decodeEventLog({ abi: NFT_EXCHANGE_EVENTS, data: log.data, topics: log.topics, eventName: 'ListingSold', strict: false });
-          if (decoded && decoded.args && decoded.args.listingId.toString() === listing.blockchain_listing_id) {
+          // Strip v2_ prefix if present for comparison
+          const expectedListingId = listing.blockchain_listing_id.startsWith('v2_') 
+            ? listing.blockchain_listing_id.substring(3)
+            : listing.blockchain_listing_id;
+          
+          if (decoded && decoded.args && decoded.args.listingId.toString() === expectedListingId) {
             buyerActualAddress = decoded.args.buyer;
             // Optional: Verify price from event matches listing.price
             // const eventPrice = Number(decoded.args.price) / 1e6; // Assuming USDC
@@ -698,7 +722,10 @@ listings.post('/:id/purchase', authMiddleware(), async (c) => {
           }
         } catch (e) { /* Skip */ }
       }
-      if (!eventFound) return c.json({ error: 'NFTExchange ListingSold event not found or ID mismatch' }, 400);
+      if (!eventFound) {
+        const contractVersion = listing.contract_type === 'nft_exchange_v2' ? 'v2' : 'v1';
+        return c.json({ error: `NFTExchange ${contractVersion} ListingSold event not found or ID mismatch` }, 400);
+      }
     } else if (listing.contract_type === 'seaport') {
       let eventFound = false;
       for (const log of receipt.logs) {
@@ -773,6 +800,16 @@ listings.post('/:id/purchase', authMiddleware(), async (c) => {
       }),
       tx_hash: body.txHash,
       contract_type: listing.contract_type
+    });
+    
+    return c.json({ 
+      success: true, 
+      message: 'Purchase recorded successfully',
+      listing: {
+        id: listing.id,
+        blockchain_listing_id: listing.blockchain_listing_id,
+        status: 'sold'
+      }
     });
     
   } catch (error) {

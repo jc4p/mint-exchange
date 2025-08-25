@@ -155,7 +155,13 @@ contract NFTExchange is Owned, ReentrancyGuard {
         if (nftContract.code.length == 0) return false;
         
         try IERC165(nftContract).supportsInterface(ERC721_INTERFACE_ID) returns (bool supported) {
-            return supported;
+            if (supported) return true;
+        } catch {}
+        
+        // Fallback: try calling balanceOf with a valid address to check if it behaves like ERC721
+        // We use balanceOf instead of ownerOf because ownerOf can revert for non-existent tokens
+        try ERC721(nftContract).balanceOf(address(this)) returns (uint256) {
+            return true;
         } catch {
             return false;
         }
@@ -167,7 +173,12 @@ contract NFTExchange is Owned, ReentrancyGuard {
         try IERC165(nftContract).supportsInterface(ERC1155_INTERFACE_ID) returns (bool supported) {
             return supported;
         } catch {
-            return false;
+            // Fallback: try calling balanceOf to check if it behaves like ERC1155
+            try ERC1155(nftContract).balanceOf(address(this), 0) returns (uint256) {
+                return true;
+            } catch {
+                return false;
+            }
         }
     }
 
@@ -231,21 +242,43 @@ contract NFTExchange is Owned, ReentrancyGuard {
         
         if (!isNFT721 && !isNFT1155) revert UnsupportedNFTStandard();
         
-        // Verify ownership
+        // Verify ownership with try-catch for proxy contracts
         if (isNFT721) {
-            if (ERC721(nftContract).ownerOf(tokenId) != msg.sender) {
-                revert UnauthorizedCaller();
+            try ERC721(nftContract).ownerOf(tokenId) returns (address owner) {
+                if (owner != msg.sender) revert UnauthorizedCaller();
+            } catch {
+                revert InvalidNFTContract();
             }
-            // Check approval
-            if (ERC721(nftContract).getApproved(tokenId) != address(this) &&
-                !ERC721(nftContract).isApprovedForAll(msg.sender, address(this))) {
-                revert UnauthorizedCaller();
+            
+            // Check approval with try-catch
+            try ERC721(nftContract).getApproved(tokenId) returns (address approved) {
+                bool isApprovedForAll = false;
+                try ERC721(nftContract).isApprovedForAll(msg.sender, address(this)) returns (bool result) {
+                    isApprovedForAll = result;
+                } catch {}
+                
+                if (approved != address(this) && !isApprovedForAll) {
+                    revert UnauthorizedCaller();
+                }
+            } catch {
+                // If getApproved fails, check isApprovedForAll only
+                try ERC721(nftContract).isApprovedForAll(msg.sender, address(this)) returns (bool result) {
+                    if (!result) revert UnauthorizedCaller();
+                } catch {
+                    revert UnauthorizedCaller();
+                }
             }
         } else {
-            uint256 balance = ERC1155(nftContract).balanceOf(msg.sender, tokenId);
-            if (balance == 0) revert InsufficientNFTBalance();
+            try ERC1155(nftContract).balanceOf(msg.sender, tokenId) returns (uint256 balance) {
+                if (balance == 0) revert InsufficientNFTBalance();
+            } catch {
+                revert InvalidNFTContract();
+            }
+            
             // Check approval
-            if (!ERC1155(nftContract).isApprovedForAll(msg.sender, address(this))) {
+            try ERC1155(nftContract).isApprovedForAll(msg.sender, address(this)) returns (bool approved) {
+                if (!approved) revert UnauthorizedCaller();
+            } catch {
                 revert UnauthorizedCaller();
             }
         }
@@ -263,16 +296,22 @@ contract NFTExchange is Owned, ReentrancyGuard {
             cancelled: false
         });
         
-        // Get metadata URI for event
+        // Get metadata URI for event - handle proxy contracts gracefully
         string memory metadataURI = "";
         if (isNFT721) {
+            // Try standard tokenURI first
             try ERC721(nftContract).tokenURI(tokenId) returns (string memory uri) {
                 metadataURI = uri;
-            } catch {}
+            } catch {
+                // Some contracts might have a different method name or no URI method
+                // Leave empty if we can't get it
+            }
         } else {
             try ERC1155(nftContract).uri(tokenId) returns (string memory uri) {
                 metadataURI = uri;
-            } catch {}
+            } catch {
+                // Leave empty if we can't get it
+            }
         }
         
         emit ListingCreated(listingId, msg.sender, nftContract, tokenId, price, metadataURI);
@@ -310,21 +349,38 @@ contract NFTExchange is Owned, ReentrancyGuard {
         // Transfer USDC from buyer
         usdcToken.safeTransferFrom(msg.sender, address(this), listing.price);
         
-        // Transfer NFT from seller to buyer
+        // Transfer NFT from seller to buyer with try-catch for proxy contracts
         if (listing.isERC721) {
-            ERC721(listing.nftContract).safeTransferFrom(
+            try ERC721(listing.nftContract).safeTransferFrom(
                 listing.seller,
                 msg.sender,
                 listing.tokenId
-            );
+            ) {
+                // Transfer successful
+            } catch {
+                // Try regular transferFrom if safeTransferFrom fails
+                try ERC721(listing.nftContract).transferFrom(
+                    listing.seller,
+                    msg.sender,
+                    listing.tokenId
+                ) {
+                    // Transfer successful
+                } catch {
+                    revert TransferFailed();
+                }
+            }
         } else {
-            ERC1155(listing.nftContract).safeTransferFrom(
+            try ERC1155(listing.nftContract).safeTransferFrom(
                 listing.seller,
                 msg.sender,
                 listing.tokenId,
                 1,
                 ""
-            );
+            ) {
+                // Transfer successful
+            } catch {
+                revert TransferFailed();
+            }
         }
         
         // Distribute payments
@@ -383,21 +439,43 @@ contract NFTExchange is Owned, ReentrancyGuard {
         
         bool isNFT721 = isERC721(offer.nftContract);
         
-        // Verify seller owns the NFT
+        // Verify seller owns the NFT with try-catch for proxy contracts
         if (isNFT721) {
-            if (ERC721(offer.nftContract).ownerOf(offer.tokenId) != msg.sender) {
-                revert UnauthorizedCaller();
+            try ERC721(offer.nftContract).ownerOf(offer.tokenId) returns (address owner) {
+                if (owner != msg.sender) revert UnauthorizedCaller();
+            } catch {
+                revert InvalidNFTContract();
             }
-            // Check approval
-            if (ERC721(offer.nftContract).getApproved(offer.tokenId) != address(this) &&
-                !ERC721(offer.nftContract).isApprovedForAll(msg.sender, address(this))) {
-                revert UnauthorizedCaller();
+            
+            // Check approval with try-catch
+            try ERC721(offer.nftContract).getApproved(offer.tokenId) returns (address approved) {
+                bool isApprovedForAll = false;
+                try ERC721(offer.nftContract).isApprovedForAll(msg.sender, address(this)) returns (bool result) {
+                    isApprovedForAll = result;
+                } catch {}
+                
+                if (approved != address(this) && !isApprovedForAll) {
+                    revert UnauthorizedCaller();
+                }
+            } catch {
+                // If getApproved fails, check isApprovedForAll only
+                try ERC721(offer.nftContract).isApprovedForAll(msg.sender, address(this)) returns (bool result) {
+                    if (!result) revert UnauthorizedCaller();
+                } catch {
+                    revert UnauthorizedCaller();
+                }
             }
         } else {
-            uint256 balance = ERC1155(offer.nftContract).balanceOf(msg.sender, offer.tokenId);
-            if (balance == 0) revert InsufficientNFTBalance();
+            try ERC1155(offer.nftContract).balanceOf(msg.sender, offer.tokenId) returns (uint256 balance) {
+                if (balance == 0) revert InsufficientNFTBalance();
+            } catch {
+                revert InvalidNFTContract();
+            }
+            
             // Check approval
-            if (!ERC1155(offer.nftContract).isApprovedForAll(msg.sender, address(this))) {
+            try ERC1155(offer.nftContract).isApprovedForAll(msg.sender, address(this)) returns (bool approved) {
+                if (!approved) revert UnauthorizedCaller();
+            } catch {
                 revert UnauthorizedCaller();
             }
         }
@@ -411,21 +489,38 @@ contract NFTExchange is Owned, ReentrancyGuard {
         // Transfer USDC from buyer
         usdcToken.safeTransferFrom(offer.buyer, address(this), offer.amount);
         
-        // Transfer NFT from seller to buyer
+        // Transfer NFT from seller to buyer with try-catch for proxy contracts
         if (isNFT721) {
-            ERC721(offer.nftContract).safeTransferFrom(
+            try ERC721(offer.nftContract).safeTransferFrom(
                 msg.sender,
                 offer.buyer,
                 offer.tokenId
-            );
+            ) {
+                // Transfer successful
+            } catch {
+                // Try regular transferFrom if safeTransferFrom fails
+                try ERC721(offer.nftContract).transferFrom(
+                    msg.sender,
+                    offer.buyer,
+                    offer.tokenId
+                ) {
+                    // Transfer successful
+                } catch {
+                    revert TransferFailed();
+                }
+            }
         } else {
-            ERC1155(offer.nftContract).safeTransferFrom(
+            try ERC1155(offer.nftContract).safeTransferFrom(
                 msg.sender,
                 offer.buyer,
                 offer.tokenId,
                 1,
                 ""
-            );
+            ) {
+                // Transfer successful
+            } catch {
+                revert TransferFailed();
+            }
         }
         
         // Distribute payments

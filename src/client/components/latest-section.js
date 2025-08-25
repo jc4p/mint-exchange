@@ -111,8 +111,11 @@ export class LatestSection extends BaseElement {
           color: var(--text-primary, #121416);
           margin: 0 0 8px 0;
           overflow: hidden;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
           text-overflow: ellipsis;
-          white-space: nowrap;
+          line-height: 1.3;
         }
         
         latest-section .latest-description {

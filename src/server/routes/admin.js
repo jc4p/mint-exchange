@@ -1595,4 +1595,29 @@ admin.get('/check-nft-approval-direct/:contract/:tokenId', async (c) => {
   }
 })
 
+// Manual listing verification endpoint
+admin.post('/verify-listings', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const { nftExchangeLimit = 100, seaportLimit = 50 } = body
+    
+    const { ListingVerifier } = await import('../listing-verifier.js')
+    const verifier = new ListingVerifier(c.env)
+    
+    const result = await verifier.verifyAllListings({
+      nftExchangeLimit,
+      seaportLimit,
+      maxRuntime: 120000 // 2 minutes for manual runs
+    })
+    
+    return c.json({
+      success: true,
+      verification: result
+    })
+  } catch (error) {
+    console.error('Error verifying listings:', error)
+    return c.json({ error: 'Failed to verify listings', details: error.message }, 500)
+  }
+})
+
 export default admin

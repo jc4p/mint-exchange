@@ -83,15 +83,24 @@ export class CreateListing extends BaseElement {
       const isERC1155 = tokenStandard === 'ERC1155'
       console.log(`NFT is ${tokenStandard}`)
       
+      // Check if we should use Seaport (via query param)
+      const useSeaport = new URLSearchParams(window.location.search).get('seaport') === 'true'
+      
+      // Default to NFTExchange v2 for new listings (proxy NFT support)
+      // Can override with ?v1=true for old contract
+      const useV1 = new URLSearchParams(window.location.search).get('v1') === 'true'
+      const contractType = useSeaport ? 'seaport' : (useV1 ? 'nft_exchange' : 'nft_exchange_v2')
+      
       // Create listing on blockchain
-      console.log('Creating listing on blockchain using Seaport...')
+      console.log(`Creating listing on blockchain using ${contractType}...`)
       const result = await transactionManager.createListing(
         nft.contract.address,
         nft.tokenId,
         parseFloat(price),
         expiryDays,
         isERC1155,
-        true   // Always use Seaport for new listings
+        useSeaport,
+        contractType
       )
       
       // Extract txHash and order data
@@ -119,7 +128,7 @@ export class CreateListing extends BaseElement {
           tokenId: nft.tokenId,
           price: price,
           expiry: expiryDate.toISOString(),
-          contractType: 'seaport', // Always Seaport for new listings
+          contractType: contractType,
           orderHash: orderHash, // Seaport order hash
           orderParameters: orderData, // Include Seaport order data (parameters + signature)
           metadata: {

@@ -56,10 +56,23 @@ app.onError((err, c) => {
 // Export for Cloudflare Workers
 const worker = {
   fetch: app.fetch,
-  // Scheduled worker for event indexing
+  // Scheduled workers
   async scheduled(event, env, ctx) {
-    const { default: scheduledHandler } = await import('./server/indexer.js')
-    return scheduledHandler.scheduled(event, env, ctx)
+    // Determine which cron job triggered this based on the cron expression
+    const cronExpression = event.cron
+    
+    if (cronExpression === "*/2 * * * *") {
+      // Event indexer runs every 2 minutes
+      const { default: indexerHandler } = await import('./server/indexer.js')
+      return indexerHandler.scheduled(event, env, ctx)
+    } else if (cronExpression === "*/10 * * * *") {
+      // Listing verifier runs every 10 minutes
+      const { default: verifierHandler } = await import('./server/listing-verifier.js')
+      return verifierHandler.scheduled(event, env, ctx)
+    } else {
+      console.log('Unknown cron expression:', cronExpression)
+      return new Response('Unknown scheduled task', { status: 400 })
+    }
   }
 }
 

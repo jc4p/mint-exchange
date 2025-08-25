@@ -71,8 +71,14 @@ export class Database {
     }
     
     if (search) {
-      conditions.push('(LOWER(l.name) LIKE ? OR LOWER(l.description) LIKE ?)')
-      params.push(`%${search.toLowerCase()}%`, `%${search.toLowerCase()}%`)
+      // Check if search looks like a contract address
+      if (search.startsWith('0x') && search.length === 42) {
+        conditions.push('l.nft_contract = ?')
+        params.push(search.toLowerCase())
+      } else {
+        conditions.push('(LOWER(l.name) LIKE ? OR LOWER(l.description) LIKE ?)')
+        params.push(`%${search.toLowerCase()}%`, `%${search.toLowerCase()}%`)
+      }
     }
 
     if (contractType) {
@@ -102,7 +108,12 @@ export class Database {
     const totalParams = []
     if (sellerFid) totalParams.push(sellerFid)
     if (search) {
-      totalParams.push(`%${search.toLowerCase()}%`, `%${search.toLowerCase()}%`)
+      // Check if search looks like a contract address
+      if (search.startsWith('0x') && search.length === 42) {
+        totalParams.push(search.toLowerCase())
+      } else {
+        totalParams.push(`%${search.toLowerCase()}%`, `%${search.toLowerCase()}%`)
+      }
     }
     if (contractType) totalParams.push(contractType)
 
@@ -518,43 +529,89 @@ export class Database {
     return formatActivityTimestamps(activityData)
   }
 
+  // Get user's sold listings
+  async getUserSoldListings({ page = 1, limit = 20, sort = 'recent', sellerFid }) {
+    const offset = (page - 1) * limit
+    let orderBy = 'sold_at DESC'
+    
+    if (sort === 'price_asc') orderBy = 'price ASC'
+    else if (sort === 'price_desc') orderBy = 'price DESC'
+    
+    const query = `
+      SELECT 
+        l.*,
+        u.username,
+        u.display_name,
+        u.pfp_url
+      FROM listings l
+      LEFT JOIN users u ON l.seller_fid = u.fid
+      WHERE l.seller_fid = ?
+        AND l.sold_at IS NOT NULL
+      ORDER BY ${orderBy}
+      LIMIT ? OFFSET ?
+    `
+    
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM listings
+      WHERE seller_fid = ?
+        AND sold_at IS NOT NULL
+    `
+    
+    const [listings, countResult] = await Promise.all([
+      this.db.prepare(query).bind(sellerFid, limit, offset).all(),
+      this.db.prepare(countQuery).bind(sellerFid).first()
+    ])
+    
+    const total = countResult.total || 0
+    const totalPages = Math.ceil(total / limit)
+    
+    return {
+      listings: listings.results || [],
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasMore: page < totalPages
+      }
+    }
+  }
+
   // Stats and analytics
   async getUserStats(fid) {
     const [listings, sales, purchases] = await Promise.all([
       // Active listings
       this.db
         .prepare(`
-          SELECT COUNT(*) as count, SUM(price) as total_value, contract_type, order_hash, order_parameters, zone_address, conduit_key, salt, counter
+          SELECT COUNT(*) as count, SUM(price) as total_value
           FROM listings
           WHERE seller_fid = ?
             AND sold_at IS NULL
             AND cancelled_at IS NULL
             AND expiry > datetime('now')
-          GROUP BY contract_type, order_hash, order_parameters, zone_address, conduit_key, salt, counter
         `)
         .bind(fid)
-        .first(), // This might need to be .all() if listings can have multiple contract_types
+        .first(),
       
       // Sales - count listings that were sold by this user
       this.db
         .prepare(`
-          SELECT COUNT(*) as count, SUM(l.price) as total_volume, l.contract_type, l.order_hash
-          FROM listings l
-          WHERE l.seller_fid = ?
-            AND l.sold_at IS NOT NULL
-          GROUP BY l.contract_type, l.order_hash
+          SELECT COUNT(*) as count, SUM(price) as total_volume
+          FROM listings
+          WHERE seller_fid = ?
+            AND sold_at IS NOT NULL
         `)
         .bind(fid)
-        .first(), // This might need to be .all()
+        .first(),
       
       // Purchases
       this.db
         .prepare(`
-          SELECT COUNT(*) as count, SUM(price) as total_spent, contract_type, order_hash
+          SELECT COUNT(*) as count, SUM(price) as total_spent
           FROM listings
           WHERE buyer_fid = ?
             AND sold_at IS NOT NULL
-          GROUP BY contract_type, order_hash
         `)
         .bind(fid)
         .first()
@@ -627,37 +684,59 @@ export class Database {
     }
   }
 
-  // Get featured collection (most common NFT contract in active listings)
+  // Get featured collection (hardcoded or most common NFT contract in active listings)
   async getFeaturedCollection() {
-    const result = await this.db
+    // First try the hardcoded collection
+    const FEATURED_COLLECTION = '0x6b65c9ae28c4201695a1046cc03ce4d5689e18c1'
+    
+    // Check if the hardcoded collection has active listings
+    const hardcodedResult = await this.db
       .prepare(`
         SELECT 
           nft_contract,
-          contract_type,
-          order_hash,
-          order_parameters,
-          zone_address,
-          conduit_key,
-          salt,
-          counter,
           COUNT(*) as listing_count,
           MIN(name) as sample_name,
           MIN(image_url) as sample_image
         FROM listings
-        WHERE sold_at IS NULL
+        WHERE nft_contract = ?
+          AND sold_at IS NULL
           AND cancelled_at IS NULL
           AND expiry > datetime('now')
-        GROUP BY nft_contract, contract_type, order_hash, order_parameters, zone_address, conduit_key, salt, counter
-        ORDER BY listing_count DESC
-        LIMIT 1
+        GROUP BY nft_contract
       `)
+      .bind(FEATURED_COLLECTION.toLowerCase())
       .all()
     
-    if (!result.results || result.results.length === 0) {
-      return null
-    }
+    let collection = null
     
-    const collection = result.results[0]
+    // If hardcoded collection has listings, use it
+    if (hardcodedResult.results && hardcodedResult.results.length > 0 && hardcodedResult.results[0].listing_count > 0) {
+      collection = hardcodedResult.results[0]
+    } else {
+      // Otherwise, get the collection with most listings
+      const topResult = await this.db
+        .prepare(`
+          SELECT 
+            nft_contract,
+            COUNT(*) as listing_count,
+            MIN(name) as sample_name,
+            MIN(image_url) as sample_image
+          FROM listings
+          WHERE sold_at IS NULL
+            AND cancelled_at IS NULL
+            AND expiry > datetime('now')
+          GROUP BY nft_contract
+          ORDER BY listing_count DESC
+          LIMIT 1
+        `)
+        .all()
+      
+      if (!topResult.results || topResult.results.length === 0) {
+        return null
+      }
+      
+      collection = topResult.results[0]
+    }
     
     // Get sample listings for the collection
     const sampleListings = await this.db

@@ -98,7 +98,7 @@ export class BlockchainService {
   /**
    * Process ListingCreated event
    */
-  async processListingCreated(event, db) {
+  async processListingCreated(event, db, contractType = 'nft_exchange') {
     const { listingId, seller, nftContract, tokenId, price, metadataURI } = event.args
     
     console.log('Processing ListingCreated event:', {
@@ -138,9 +138,14 @@ export class BlockchainService {
       metadataURI
     )
 
+    // For v2 contracts, prefix the listing ID to avoid conflicts with v1
+    const blockchainListingId = contractType === 'nft_exchange_v2' 
+      ? `v2_${listingId.toString()}`
+      : listingId.toString()
+    
     // Create listing in database
     const result = await db.createListing({
-      blockchain_listing_id: listingId.toString(),
+      blockchain_listing_id: blockchainListingId,
       seller_fid: sellerFid,
       seller_address: seller,
       nft_contract: nftContract,
@@ -151,7 +156,8 @@ export class BlockchainService {
       image_url: metadata.image_url || '',
       name: metadata.name || `NFT #${tokenId}`,
       description: metadata.description || '',
-      tx_hash: event.transactionHash
+      tx_hash: event.transactionHash,
+      contract_type: contractType
     })
     
     // Queue share image generation (non-blocking)
@@ -163,7 +169,7 @@ export class BlockchainService {
   /**
    * Process ListingSold event
    */
-  async processListingSold(event, db) {
+  async processListingSold(event, db, contractType = 'nft_exchange') {
     const { listingId, buyer, price } = event.args
     
     console.log('Processing ListingSold event:', {
@@ -192,18 +198,28 @@ export class BlockchainService {
       }
     }
 
-    await db.markListingSold(listingId.toString(), buyer, buyerFid, event.transactionHash)
+    // For v2 contracts, prefix the listing ID to match our database
+    const blockchainListingId = contractType === 'nft_exchange_v2' 
+      ? `v2_${listingId.toString()}`
+      : listingId.toString()
+    
+    await db.markListingSold(blockchainListingId, buyer, buyerFid, event.transactionHash)
   }
 
   /**
    * Process ListingCancelled event
    */
-  async processListingCancelled(event, db) {
+  async processListingCancelled(event, db, contractType = 'nft_exchange') {
     const { listingId } = event.args
     
     console.log('Processing ListingCancelled event:', {
       listingId: listingId.toString()
     })
+
+    // For v2 contracts, prefix the listing ID to match our database
+    const blockchainListingId = contractType === 'nft_exchange_v2' 
+      ? `v2_${listingId.toString()}`
+      : listingId.toString()
 
     // Get the listing to find the seller
     const listing = await db.db
@@ -211,11 +227,11 @@ export class BlockchainService {
         SELECT * FROM listings 
         WHERE blockchain_listing_id = ?
       `)
-      .bind(listingId.toString())
+      .bind(blockchainListingId)
       .first()
       
     if (listing) {
-      await db.cancelListing(listingId.toString(), listing.seller_address, event.transactionHash)
+      await db.cancelListing(blockchainListingId, listing.seller_address, event.transactionHash)
     }
   }
 
@@ -395,6 +411,28 @@ export class BlockchainService {
       } catch (e) {
         // console.warn('Failed to decode with NFT_EXCHANGE_EVENTS, might be different contract or unknown event:', log, e.message);
       }
+    } else if (this.env.NFT_EXCHANGE_V2_ADDRESS && log.address.toLowerCase() === this.env.NFT_EXCHANGE_V2_ADDRESS.toLowerCase()) {
+      // NFTExchange v2 uses the same ABI as v1
+      try {
+        const decodedNftExchange = decodeEventLog({
+          abi: NFT_EXCHANGE_EVENTS,
+          data: log.data,
+          topics: log.topics,
+          strict: false // Do not throw if event not found
+        });
+        if (decodedNftExchange && decodedNftExchange.eventName) {
+          decodedEvent = {
+            eventName: decodedNftExchange.eventName,
+            args: decodedNftExchange.args,
+            blockNumber: Number(log.blockNumber),
+            transactionHash: log.transactionHash,
+            logIndex: log.logIndex
+          };
+          eventAbiType = 'NFT_EXCHANGE_V2';
+        }
+      } catch (e) {
+        // console.warn('Failed to decode with NFT_EXCHANGE_EVENTS, might be different contract or unknown event:', log, e.message);
+      }
     } else if (this.env.SEAPORT_CONTRACT_ADDRESS && log.address.toLowerCase() === this.env.SEAPORT_CONTRACT_ADDRESS.toLowerCase()) {
       const seaportOrderFulfilled = this.decodeSeaportOrderFulfilled(log); // This already returns a structured event or null
       if (seaportOrderFulfilled) {
@@ -420,8 +458,8 @@ export class BlockchainService {
     }
 
 
-    if (decodedEvent && eventAbiType === 'NFT_EXCHANGE') {
-      await this.processEvent(decodedEvent, db); // Existing handler for NFT Exchange
+    if (decodedEvent && (eventAbiType === 'NFT_EXCHANGE' || eventAbiType === 'NFT_EXCHANGE_V2')) {
+      await this.processEvent(decodedEvent, db, eventAbiType); // Pass contract type
       return decodedEvent;
     } else if (decodedEvent && eventAbiType === 'SEAPORT') {
       switch (decodedEvent.eventName) {
@@ -449,25 +487,28 @@ export class BlockchainService {
   /**
    * Process a single event
    */
-  async processEvent(event, db) {
+  async processEvent(event, db, contractType = 'NFT_EXCHANGE') {
+    // Map contract type to database format
+    const dbContractType = contractType === 'NFT_EXCHANGE_V2' ? 'nft_exchange_v2' : 'nft_exchange';
+    
     switch (event.eventName) {
       case 'ListingCreated':
-        await this.processListingCreated(event, db)
+        await this.processListingCreated(event, db, dbContractType)
         break
       case 'ListingSold':
-        await this.processListingSold(event, db)
+        await this.processListingSold(event, db, dbContractType)
         break
       case 'ListingCancelled':
-        await this.processListingCancelled(event, db)
+        await this.processListingCancelled(event, db, dbContractType)
         break
       case 'OfferMade':
-        await this.processOfferMade(event, db)
+        await this.processOfferMade(event, db, dbContractType)
         break
       case 'OfferAccepted':
-        await this.processOfferAccepted(event, db)
+        await this.processOfferAccepted(event, db, dbContractType)
         break
       case 'OfferCancelled':
-        await this.processOfferCancelled(event, db)
+        await this.processOfferCancelled(event, db, dbContractType)
         break
       default:
         console.log('Unhandled event:', event.eventName)
@@ -496,6 +537,22 @@ export class BlockchainService {
         // console.log(`Fetched ${nftExchangeLogs ? nftExchangeLogs.length : 0} logs for NFTExchange from ${fromBlock}-${toBlock}`);
       } catch (error) {
         console.error(`Error fetching NFTExchange logs for blocks ${fromBlock}-${toBlock}:`, error);
+      }
+    }
+
+    // Fetch logs for NFTExchange v2 contract
+    if (this.env.NFT_EXCHANGE_V2_ADDRESS) {
+      try {
+        const nftExchangeV2Logs = await this.client.getLogs({
+          address: this.env.NFT_EXCHANGE_V2_ADDRESS,
+          fromBlock: fromBlockBigInt,
+          toBlock: toBlockBigInt
+        });
+        if (nftExchangeV2Logs) {
+          allLogs = allLogs.concat(nftExchangeV2Logs.map(log => ({ ...log, _sourceContract: 'NFTExchangeV2' })));
+        }
+      } catch (error) {
+        console.error(`Error fetching NFTExchange v2 logs for blocks ${fromBlock}-${toBlock}:`, error);
       }
     }
 

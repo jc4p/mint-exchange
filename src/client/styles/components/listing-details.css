@@ -277,6 +277,39 @@
   word-break: break-word;
 }
 
+.collection-link-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.collection-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  color: #121416;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.collection-link:hover {
+  background: #e5e7eb;
+  border-color: #d1d5db;
+  transform: translateY(-1px);
+}
+
+.collection-link svg {
+  width: 18px;
+  height: 18px;
+  color: #5B3EFF;
+}
+
 .listing-actions {
   position: fixed;
   bottom: 69px; /* Above the nav bar */

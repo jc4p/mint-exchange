@@ -8,7 +8,7 @@ import {
   OrderType,
   calculateFeeAmounts 
 } from './seaport-config.js'
-import { NFT_EXCHANGE_ADDRESS, NFT_EXCHANGE_ABI } from './contract.js'
+import { NFT_EXCHANGE_ADDRESS, NFT_EXCHANGE_V2_ADDRESS, NFT_EXCHANGE_ABI } from './contract.js'
 import { getSeaportErrorMessage, debugSeaportError } from './seaport-errors.js'
 import { SeaportJSAdapter } from './seaport-adapter.js'
 
@@ -42,16 +42,19 @@ export class MarketplaceAdapter {
 
 // Adapter for existing NFTExchange contract
 export class NFTExchangeAdapter extends MarketplaceAdapter {
-  constructor(signer, account, publicClient) {
+  constructor(signer, account, publicClient, contractType = 'nft_exchange') {
     super(signer, account)
     this.publicClient = publicClient
+    this.contractType = contractType
+    // Use v2 address if specified, otherwise use v1
+    this.contractAddress = contractType === 'nft_exchange_v2' ? NFT_EXCHANGE_V2_ADDRESS : NFT_EXCHANGE_ADDRESS
   }
 
   async createListing(nft, price, duration) {
     const priceInWei = parseUnits(price.toString(), 6) // USDC has 6 decimals
     
     const { request } = await this.publicClient.simulateContract({
-      address: NFT_EXCHANGE_ADDRESS,
+      address: this.contractAddress,
       abi: NFT_EXCHANGE_ABI,
       functionName: 'createListing',
       args: [nft.contract, BigInt(nft.tokenId), priceInWei, BigInt(duration)],
@@ -59,7 +62,7 @@ export class NFTExchangeAdapter extends MarketplaceAdapter {
     })
 
     const hash = await this.signer.writeContract(request)
-    return { hash, contractType: 'nftexchange' }
+    return { hash, contractType: this.contractType }
   }
 
   async buyListing(listing) {
@@ -67,11 +70,16 @@ export class NFTExchangeAdapter extends MarketplaceAdapter {
       throw new Error('No blockchainListingId found in listing object')
     }
     
+    // Strip v2_ prefix if present to get the actual on-chain listing ID
+    const onChainListingId = listing.blockchainListingId.startsWith('v2_') 
+      ? listing.blockchainListingId.substring(3)
+      : listing.blockchainListingId
+    
     const { request } = await this.publicClient.simulateContract({
-      address: NFT_EXCHANGE_ADDRESS,
+      address: this.contractAddress,
       abi: NFT_EXCHANGE_ABI,
       functionName: 'buyListing',
-      args: [BigInt(listing.blockchainListingId)],
+      args: [BigInt(onChainListingId)],
       account: this.account
     })
 
@@ -80,11 +88,16 @@ export class NFTExchangeAdapter extends MarketplaceAdapter {
   }
 
   async cancelListing(listingId) {
+    // Strip v2_ prefix if present to get the actual on-chain listing ID
+    const onChainListingId = listingId.toString().startsWith('v2_') 
+      ? listingId.toString().substring(3)
+      : listingId
+    
     const { request } = await this.publicClient.simulateContract({
-      address: NFT_EXCHANGE_ADDRESS,
+      address: this.contractAddress,
       abi: NFT_EXCHANGE_ABI,
       functionName: 'cancelListing',
-      args: [BigInt(listingId)],
+      args: [BigInt(onChainListingId)],
       account: this.account
     })
 
@@ -96,7 +109,7 @@ export class NFTExchangeAdapter extends MarketplaceAdapter {
     const amountInWei = parseUnits(amount.toString(), 6)
     
     const { request } = await this.publicClient.simulateContract({
-      address: NFT_EXCHANGE_ADDRESS,
+      address: this.contractAddress,
       abi: NFT_EXCHANGE_ABI,
       functionName: 'makeOffer',
       args: [nft.contract, BigInt(nft.tokenId), amountInWei],
@@ -109,7 +122,7 @@ export class NFTExchangeAdapter extends MarketplaceAdapter {
 
   async acceptOffer(offerId) {
     const { request } = await this.publicClient.simulateContract({
-      address: NFT_EXCHANGE_ADDRESS,
+      address: this.contractAddress,
       abi: NFT_EXCHANGE_ABI,
       functionName: 'acceptOffer',
       args: [BigInt(offerId)],
@@ -138,5 +151,7 @@ export function getMarketplaceAdapter(contractType, signer, account, publicClien
     return new SeaportAdapter(signer, account, publicClient)
   }
   
-  return new NFTExchangeAdapter(signer, account, publicClient)
+  // Both nft_exchange and nft_exchange_v2 use the same adapter
+  // since they have the same interface
+  return new NFTExchangeAdapter(signer, account, publicClient, contractType)
 }

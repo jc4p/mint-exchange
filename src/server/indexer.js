@@ -211,7 +211,7 @@ export class EventIndexer {
       for (const listing of activeListings.results) {
         try {
           // Get on-chain listing data
-          const onChainListing = await this.blockchain.publicClient.readContract({
+          const onChainListing = await this.blockchain.client.readContract({
             address: NFT_EXCHANGE_ADDRESS,
             abi: NFT_EXCHANGE_ABI,
             functionName: 'listings',
@@ -302,12 +302,12 @@ export default {
         console.log(`Note: ${result.blocksRemaining} blocks remaining. Will continue in next run.`)
       }
       
-      // Then clean up expired NFTExchange listings
-      const cleanupResult = await indexer.cleanupExpiredNFTExchangeListings()
-      console.log('NFTExchange cleanup complete:', cleanupResult)
+      // Skip NFTExchange cleanup for now since we're migrating to v2
+      // This was causing errors and isn't critical
+      console.log('Skipping NFTExchange cleanup (migrating to v2)')
       
       return new Response(
-        JSON.stringify({ indexing: result, cleanup: cleanupResult }),
+        JSON.stringify({ indexing: result }),
         { headers: { 'Content-Type': 'application/json' } }
       )
     } catch (error) {

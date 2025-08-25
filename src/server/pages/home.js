@@ -73,7 +73,7 @@ export async function homePage(c) {
                   <div class="collection-header">
                     <h3 class="collection-name">${featuredCollection.name}</h3>
                     <div class="collection-stats">
-                      <span class="view-all">View all →</span>
+                      <a href="/collection/${featuredCollection.contract_address}" class="view-all">View all →</a>
                     </div>
                   </div>
                   <div class="collection-preview">
@@ -87,6 +87,9 @@ export async function homePage(c) {
                       </div>
                     `).join('')}
                   </div>
+                </div>
+                <div class="collections-link-container">
+                  <a href="/search" class="see-all-collections">See all trending collections →</a>
                 </div>
               ` : `
                 <div class="empty-state" style="text-align: center; padding: 60px 20px; color: #49739c;">
